@@ -1,0 +1,88 @@
+# Cursor CLI Control Plane
+
+Personal control plane that routes instructions from **Telegram** (and a **static web dashboard**) to the **Cursor CLI** over **ACP** (`agent acp`), with **SQLite-backed conversational sessions**, dashboard session list + chat, and **explicit session close** (stop/kill agent for that session).
+
+## Prerequisites
+
+- Python 3.11+
+- [Cursor CLI](https://cursor.com/docs/cli) installed — see **Windows note** below
+- `CURSOR_API_KEY` or completed `agent login` on the same machine
+- (Optional) Telegram bot token from [@BotFather](https://t.me/BotFather)
+
+## Setup
+
+```bash
+cd cursor-cli-control-plane
+python -m venv .venv
+.venv\Scripts\activate   # Windows
+pip install -r requirements.txt
+copy .env.example .env   # set CURSOR_API_KEY, TELEGRAM_BOT_TOKEN
+```
+
+Edit `config.yaml`:
+
+- Add one or more `repos` entries (name + path), or rely on Telegram `/repo` / web UI repo path.
+- Toggle `channels.telegram.enabled` / `channels.web.enabled`.
+- Optional: `acp.default_model` (global `agent --model`), `acp.stream_update_mode` (`agent_message_chunk_only` vs `all` — see [ACP docs](https://cursor.com/docs/cli/acp)).
+
+## Run
+
+```bash
+python run.py
+```
+
+- Dashboard: `http://localhost:8080/` (adjust port in `config.yaml`; static assets are under `/assets/` so WebSocket `/ws` is not blocked). The UI uses **Tailwind CSS**, **Alpine.js**, **marked**, and **DOMPurify** (CDN) so chat messages render **Markdown** safely—no frontend build step.
+- **Sessions API**: `GET/POST /api/sessions` (optional `model` on create only), `GET /api/sessions/{id}/messages`, `POST /api/sessions/{id}/message`, `POST /api/sessions/{id}/close`, `POST /api/sessions/{id}/answer`, **`WebSocket /ws`**
+- **`GET /api/models`**: exact ids from `agent models` / `--list-models` — **dashboard dropdown** uses these strings as both label and value (same as `agent --model <id>`). First row **Auto** = omit `--model`.
+- **`GET /api/models/acp?workspace=<dir>`**: optional ACP probe (diagnostics / advanced use); the web UI does not use it for the picker.
+- **Legacy aliases** (same UUID as session id): `GET/POST /api/runs`, `POST /api/runs/{id}/stop`, `POST /api/runs/{id}/answer`
+
+### Troubleshooting empty model dropdown
+
+1. **Browser (F12 → Console)**: filter **`[cp-models]`** — should show `GET /api/models` and `modelCount`.
+2. **Network tab**: open **`/api/models`** — JSON `models` array; `error` if the CLI failed.
+3. **Server terminal**: `GET /models` log line; run `agent models` on the same machine if the list is empty.
+
+## How sessions work
+
+- **Workspace is per session**: each session stores a `repo_path`; the agent runs with that cwd until the session is closed.
+- **One ACP process per open session**: follow-up messages use `session_prompt` on the same client — not a new subprocess per message.
+- **Model**: set **only when creating** a session — exact `agent --model` id, or **Auto** (omit `--model`). It cannot be changed after creation. If unset at creation, `CURSOR_AGENT_MODEL` / `acp.default_model` can still apply when spawning (see `session_manager._effective_model`).
+- **Close** ends the CLI for that session only. **Closed sessions** stay in the list; sending a message **reopens** them and tries **`session_load`** with the saved ACP session id.
+
+## Telegram usage
+
+1. Start the server with `TELEGRAM_BOT_TOKEN` set.
+2. Open your bot, send `/start`.
+3. `/repos` — list configured repos; `/repo C:\path\to\repo` — set workspace for this chat.
+4. Plain messages continue the **open session** for that repo (same agent process until you close it).
+5. `/session` — list sessions · `/session close` — stop agent for current thread · `/session new` — next message starts a **new** session for that repo.
+
+## Web usage
+
+1. Open the dashboard; your browser gets a stable **client id** (localStorage) so sessions are scoped to you.
+2. **Sidebar**: list sessions (open and closed). **New chat** picks a repo, optional **model**, and creates a session.
+3. **Select any session** to load history and **resume**; the session header shows the model chosen at creation (read-only).
+4. Type in the chat box to send.
+5. **Close session** stops the agent subprocess for that session. You can still select it later and send to reopen.
+6. When the agent asks a question, answer from the dashboard for that session.
+
+## Architecture
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Windows: `agent` not found (but works in PowerShell)
+
+The install script usually puts the CLI in **`%USERPROFILE%\.local\bin\agent.exe`**. Terminals you open often add that to `PATH`, but **Python / Cursor / services may not**, so the control plane cannot see `agent`.
+
+1. In PowerShell where `agent --version` works, run: **`(Get-Command agent).Source`**
+2. Put that path in **`.env`** if needed:  
+   `CURSOR_AGENT_BIN=C:\Users\You\AppData\Local\cursor-agent\agent.ps1`  
+   (Typical folder has **`agent.cmd`** + **`agent.ps1`**: we prefer **`.cmd`** via `cmd.exe /c`, else **`.ps1`** via PowerShell, else **`.exe`** if present.)
+
+Or add `%USERPROFILE%\.local\bin` to the **Windows user or system PATH** and restart the app.
+
+## Notes
+
+- ACP wire format may evolve with Cursor releases; adjust `control_plane/acp_client.py` if needed.
+- On Windows, closing a session uses `terminate()` and best-effort `taskkill` for the process tree.

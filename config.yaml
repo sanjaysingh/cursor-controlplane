@@ -1,0 +1,19 @@
+repos: []
+
+channels:
+  telegram:
+    enabled: true
+  web:
+    enabled: true
+
+server:
+  host: 0.0.0.0
+  port: 8080
+
+acp:
+  command: agent
+  extra_args: []
+  # When a session’s model is Auto (unset): optional `agent --model` here (else truly omit; run `agent models` for ids).
+  default_model: ""
+  # session/update: agent_message_chunk_only matches Cursor ACP docs; use "all" for legacy streaming.
+  stream_update_mode: agent_message_chunk_only
