@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,6 +24,13 @@ from control_plane.state import AppState
 from control_plane.workspace_paths import resolve_workspace_root
 
 logger = logging.getLogger(__name__)
+
+
+def _database_path() -> Path:
+    override = (os.environ.get("CONTROL_PLANE_DB_PATH") or "").strip()
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent.parent / "data" / "control_plane.db"
 
 
 @asynccontextmanager
@@ -60,7 +68,7 @@ def create_app() -> FastAPI:
     app_config, env = get_settings()
     hub = EventHub()
     registry = ChannelRegistry()
-    db = Database(Path(__file__).resolve().parent.parent / "data" / "control_plane.db")
+    db = Database(_database_path())
     session_manager = SessionManager(db, app_config, env, registry, hub)
     web = WebChannel(hub)
     registry.register(web)

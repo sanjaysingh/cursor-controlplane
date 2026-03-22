@@ -5,22 +5,46 @@ Personal control plane that routes instructions from **Telegram** (and a **stati
 ## Prerequisites
 
 - Python 3.11+
-- [Cursor CLI](https://cursor.com/docs/cli) installed — see **Windows note** below
+- [Cursor CLI](https://cursor.com/docs/cli) installed and on your **`PATH`** (on **Windows**, see the section below if `agent` works in a terminal but not when you start the server from the IDE)
 - `CURSOR_API_KEY` or completed `agent login` on the same machine
 - (Optional) Telegram bot token from [@BotFather](https://t.me/BotFather)
 - (Optional) [GitHub CLI](https://cli.github.com/) (`gh`) for **`/repos`** / **`GET /api/github/repos`** — run `gh auth login` on the server host
 
 ## Setup
 
+From the **repository root** (the folder that contains `run.py` and `config.yaml`):
+
 ```bash
-cd cursor-cli-control-plane
 python -m venv .venv
-.venv\Scripts\activate   # Windows
-pip install -r requirements.txt
-copy .env.example .env   # set CURSOR_API_KEY, TELEGRAM_BOT_TOKEN
 ```
 
-**Virtual environment:** If you **move or copy** this project to a new folder, **do not copy `.venv`**. It embeds absolute paths and will confuse `python` / `pip`. Stop any running `python run.py` (and close terminals that activated this env), delete the `.venv` folder, then run `python -m venv .venv` and `pip install -r requirements.txt` again. If Windows says “access denied” on delete, end the Python processes in Task Manager or reboot, then remove `.venv`.
+On some systems only **`python3`** is available (common on macOS/Linux); use `python3 -m venv .venv` and `python3 run.py` in that case.
+
+Activate the virtual environment, then install dependencies:
+
+| Environment | Command |
+|-------------|---------|
+| **macOS / Linux / WSL** (bash, zsh, etc.) | `source .venv/bin/activate` |
+| **Windows — Command Prompt** | `.venv\Scripts\activate.bat` |
+| **Windows — PowerShell** | `.\.venv\Scripts\Activate.ps1` (if execution policy blocks scripts, run once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`) |
+
+```bash
+pip install -r requirements.txt
+```
+
+Copy the env template and edit values:
+
+| OS | Command |
+|----|---------|
+| **Windows** (cmd / PowerShell) | `copy .env.example .env` |
+| **macOS / Linux / WSL** | `cp .env.example .env` |
+
+Set at least `CURSOR_API_KEY` and (if you use Telegram) `TELEGRAM_BOT_TOKEN`. See `.env.example` for optional variables.
+
+**Virtual environment:** If you **move or copy** this project to a new folder, **do not copy `.venv`**. It embeds absolute paths and will confuse `python` / `pip`. Stop any running server (`python run.py` or `python3 run.py`), close terminals that activated this env, delete the `.venv` folder, then run `python -m venv .venv` and `pip install -r requirements.txt` again (use **`python3` / `pip3`** everywhere if that is what your OS provides).
+
+- **Windows:** If delete says “access denied”, end Python in Task Manager or reboot, then remove `.venv`.
+- **macOS / Linux / WSL:** `rm -rf .venv`
 
 Edit `config.yaml`:
 
@@ -33,6 +57,28 @@ Edit `config.yaml`:
 ```bash
 python run.py
 ```
+
+## Tests
+
+**Python (API, database, model parsing):** from the repo root, with dev dependencies installed:
+
+| Step | Command |
+|------|---------|
+| Install | `pip install -r requirements.txt -r requirements-dev.txt` |
+| Run | `pytest` |
+
+Tests use a temporary SQLite file and config via `CONTROL_PLANE_DB_PATH` and `CONTROL_PLANE_CONFIG` (set by fixtures); they do not touch your normal `data/control_plane.db`.
+
+**Dashboard helpers (shared `dashboard-utils.js`):**
+
+| Step | Command |
+|------|---------|
+| Install | `npm install` |
+| Run | `npm test` |
+
+**CI:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs both suites on every push and pull request to `main`.
+
+**Requiring tests on pull requests:** in the GitHub repo, go to **Settings → Rules → Rulesets** (or **Branches → Branch protection rules**), protect `main`, and enable **Require status checks to pass**. Add the **Tests** check from the **CI** workflow (exact label may appear as `Tests` or `CI / Tests` depending on GitHub’s UI). Until that rule exists, CI still runs on PRs but merging is not blocked automatically.
 
 - Dashboard: `http://localhost:8080/` (adjust port in `config.yaml`; static assets are under `/assets/` so WebSocket `/ws` is not blocked). The UI uses **Tailwind CSS**, **Alpine.js**, **marked**, and **DOMPurify** (CDN) so chat messages render **Markdown** safely—no frontend build step.
 - **Sessions API**: `GET/POST /api/sessions` (optional `model` on create only), `GET /api/sessions/{id}/messages`, `POST /api/sessions/{id}/message`, `POST /api/sessions/{id}/close`, `POST /api/sessions/{id}/answer`, **`WebSocket /ws`**
@@ -77,13 +123,15 @@ python run.py
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Windows: `agent` not found (but works in PowerShell)
+## Troubleshooting: `agent` not found
 
-The install script usually puts the CLI in **`%USERPROFILE%\.local\bin\agent.exe`**. Terminals you open often add that to `PATH`, but **Python / Cursor / services may not**, so the control plane cannot see `agent`.
+**macOS / Linux / WSL:** Run `which agent` (or `command -v agent`) in the **same** environment you use for `python run.py`. Install the [Cursor CLI](https://cursor.com/docs/cli) and ensure its directory is on **`PATH`**, or set **`acp.command`** in `config.yaml` to the full path of the `agent` executable. The server also scans **`~/.local/bin`**, which matches a common install location.
+
+**Windows (works in PowerShell but not from the IDE / service):** The install script usually puts the CLI in **`%USERPROFILE%\.local\bin\agent.exe`**. Terminals you open often add that to `PATH`, but **Python / Cursor / services may not**, so the control plane cannot see `agent`.
 
 The server also scans **`~/.local/bin`**, **`%USERPROFILE%\.local\bin`**, and **`%LOCALAPPDATA%\cursor-agent`** when resolving the CLI, which often fixes GUI-launched Python without extra configuration.
 
-If it still fails:
+If it still fails on Windows:
 
 1. In PowerShell where `agent --version` works, run: **`(Get-Command agent).Source`**
 2. Add **`%USERPROFILE%\.local\bin`** (or that folder) to the **Windows user or system PATH** and restart the app, **or** set an explicit executable in **`config.yaml`**, for example:  
@@ -93,4 +141,4 @@ If it still fails:
 ## Notes
 
 - ACP wire format may evolve with Cursor releases; adjust `control_plane/acp_client.py` if needed.
-- On Windows, closing a session uses `terminate()` and best-effort `taskkill` for the process tree.
+- **Process cleanup when closing a session:** on **Windows**, the server uses `terminate()` and best-effort `taskkill` for the agent process tree; on **macOS / Linux / WSL**, Unix termination (`terminate()` / process group) applies instead of `taskkill`.

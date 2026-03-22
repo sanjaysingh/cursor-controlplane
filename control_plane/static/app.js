@@ -83,6 +83,10 @@ function dashboard() {
 
     /** Folder the agent uses: `repo_path` or workspace root when empty (matches session list). */
     sessionWorkspacePath(s) {
+      const u = typeof cpDashboard !== "undefined" ? cpDashboard : null;
+      if (u && typeof u.sessionWorkspacePath === "function") {
+        return u.sessionWorkspacePath(s, this.workspaceRoot);
+      }
       if (!s) return "—";
       const rp = s.repo_path != null ? String(s.repo_path).trim() : "";
       if (rp) return rp;
@@ -252,6 +256,10 @@ function dashboard() {
      * Option label: normally exact CLI id (same as value). If `name` differs (e.g. stored id not in list), show `name`.
      */
     modelOptionLabel(opt) {
+      const u = typeof cpDashboard !== "undefined" ? cpDashboard : null;
+      if (u && typeof u.modelOptionLabel === "function") {
+        return u.modelOptionLabel(opt);
+      }
       if (!opt) return "";
       const id = String(opt.id || "").trim();
       const name = String(opt.name || "").trim();
