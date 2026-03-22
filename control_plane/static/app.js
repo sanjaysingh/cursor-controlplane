@@ -48,7 +48,17 @@ function dashboard() {
     /** Hide sessions/settings column for full-width chat; persisted in localStorage. */
     sidebarCollapsed: (() => {
       try {
-        return localStorage.getItem("cp-sidebar-collapsed") === "true";
+        const v = localStorage.getItem("cp-sidebar-collapsed");
+        if (v === "true") return true;
+        if (v === "false") return false;
+        // Unset: chat-first on narrow viewports (matches Tailwind `md`).
+        if (
+          typeof window !== "undefined" &&
+          window.matchMedia("(max-width: 767px)").matches
+        ) {
+          return true;
+        }
+        return false;
       } catch {
         return false;
       }
@@ -71,6 +81,20 @@ function dashboard() {
       return String(s.model).trim();
     },
 
+    /** Folder the agent uses: `repo_path` or workspace root when empty (matches session list). */
+    sessionWorkspacePath(s) {
+      if (!s) return "—";
+      const rp = s.repo_path != null ? String(s.repo_path).trim() : "";
+      if (rp) return rp;
+      const root = (this.workspaceRoot || "").trim();
+      return root || "Workspace root";
+    },
+
+    get selectedSessionWorkspaceLabel() {
+      const s = this.sessions.find((x) => x.id === this.selectedSessionId);
+      return this.sessionWorkspacePath(s);
+    },
+
     get atSessionLimit() {
       return Array.isArray(this.sessions) && this.sessions.length >= this.maxSessions;
     },
@@ -79,6 +103,18 @@ function dashboard() {
       this.sidebarCollapsed = !this.sidebarCollapsed;
       try {
         localStorage.setItem("cp-sidebar-collapsed", this.sidebarCollapsed ? "true" : "false");
+      } catch {
+        /* ignore */
+      }
+    },
+
+    /** After picking a session on phone, return to full-width chat. */
+    _collapseSidebarIfMobile() {
+      if (typeof window === "undefined" || !window.matchMedia) return;
+      if (!window.matchMedia("(max-width: 767px)").matches) return;
+      this.sidebarCollapsed = true;
+      try {
+        localStorage.setItem("cp-sidebar-collapsed", "true");
       } catch {
         /* ignore */
       }
@@ -512,6 +548,7 @@ function dashboard() {
       }
       await this.loadMessages();
       await this.$nextTick();
+      this._collapseSidebarIfMobile();
     },
 
     async loadMessages() {
