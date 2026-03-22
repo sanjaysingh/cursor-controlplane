@@ -357,30 +357,24 @@
               </svg>
               <span x-text="error"></span>
             </div>
-            <div class="flex gap-3 rounded-xl border border-surface-700/80 bg-surface-850 p-2 shadow-inner focus-within:border-indigo-500/40 focus-within:ring-1 focus-within:ring-indigo-500/20">
+            <div class="flex items-center gap-3 rounded-xl border border-surface-700/80 bg-surface-850 p-2 shadow-inner focus-within:border-indigo-500/40 focus-within:ring-1 focus-within:ring-indigo-500/20">
               <textarea
+                x-ref="composerDraft"
                 x-model="draft"
                 rows="2"
                 placeholder="Message the agent…"
                 :disabled="!selectedSessionId"
-                @keydown.ctrl.enter="sendDraft()"
-                @keydown.meta.enter="sendDraft()"
+                @keydown.ctrl.enter.prevent="sendDraft()"
+                @keydown.meta.enter.prevent="sendDraft()"
                 class="min-h-[44px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-0 disabled:opacity-40"
               ></textarea>
               <button
                 type="button"
                 @click="sendDraft()"
                 :disabled="!canSend"
-                class="btn-primary self-end px-5 disabled:cursor-not-allowed disabled:opacity-35"
+                class="btn-primary shrink-0 self-center px-5 disabled:cursor-not-allowed disabled:opacity-35"
               >
-                <span x-show="!sending">Send</span>
-                <span x-show="sending" class="flex items-center gap-2">
-                  <svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Sending
-                </span>
+                Send
               </button>
             </div>
             <p class="mt-2 text-center text-[10px] text-slate-600">

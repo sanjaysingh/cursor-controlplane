@@ -26,7 +26,8 @@ function dashboard() {
     pendingQuestion: null,
     freeAnswer: "",
     error: "",
-    sending: false,
+    /** True after dispatching a message until the POST completes (agent may still be streaming). */
+    awaitingAgentReply: false,
     wsState: "disconnected",
     _ws: null,
     /** From `GET /api/models` — exact `agent --model` ids (label === value). */
@@ -42,9 +43,13 @@ function dashboard() {
     repoPickerLoading: false,
     repoCloneBusy: false,
 
-    /** Send button only — composer stays enabled whenever a session is selected */
+    /** Send button — disabled while a message is in flight (draft cleared immediately on send). */
     get canSend() {
-      return !!(this.selectedSessionId && this.draft.trim() && !this.sending);
+      return !!(
+        this.selectedSessionId &&
+        this.draft.trim() &&
+        !this.awaitingAgentReply
+      );
     },
 
     /** Read-only label for active session (model is only set when creating a session). */
@@ -427,6 +432,7 @@ function dashboard() {
 
     async selectSession(id) {
       this.selectedSessionId = id;
+      this.awaitingAgentReply = false;
       this.pendingQuestion = null;
       this.freeAnswer = "";
       this.streamText = "";
@@ -450,29 +456,57 @@ function dashboard() {
       this.$nextTick(() => this._scrollMessagesEnd());
     },
 
+    /**
+     * Keep Alpine x-model and the textarea DOM in sync when draft is set from JS
+     * (x-model can leave the visible text stale on programmatic updates).
+     */
+    _setComposerDraft(value) {
+      this.draft = value;
+      this.$nextTick(() => {
+        const el = this.$refs.composerDraft;
+        if (!el) return;
+        if (el.value !== value) {
+          el.value = value;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      });
+    },
+
     async sendDraft() {
-      if (!this.canSend) return;
+      if (!this.selectedSessionId || !this.draft.trim() || this.awaitingAgentReply) return;
+      const text = this.draft.trim();
+      const sessionId = this.selectedSessionId;
       this.error = "";
-      this.sending = true;
+      this._setComposerDraft("");
       this.streamText = "";
+      this.awaitingAgentReply = true;
       try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(this.selectedSessionId)}/message`, {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/message`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: this.draft }),
+          body: JSON.stringify({ text }),
         });
         const data = await res.json();
         if (!res.ok) {
           this.error = data.error || res.statusText;
+          if (this.selectedSessionId === sessionId) {
+            this._setComposerDraft(text);
+          }
           return;
         }
-        this.mergeSession(data);
-        this.draft = "";
-        await this.loadMessages();
+        if (this.selectedSessionId === sessionId) {
+          this.mergeSession(data);
+          await this.loadMessages();
+        }
       } catch (e) {
         this.error = String(e);
+        if (this.selectedSessionId === sessionId) {
+          this._setComposerDraft(text);
+        }
       } finally {
-        this.sending = false;
+        if (this.selectedSessionId === sessionId) {
+          this.awaitingAgentReply = false;
+        }
       }
     },
 
@@ -501,6 +535,7 @@ function dashboard() {
       this.selectedStatus = "";
       this.messages = [];
       this.streamText = "";
+      this.awaitingAgentReply = false;
       await this.loadRepoPicker();
     },
 
