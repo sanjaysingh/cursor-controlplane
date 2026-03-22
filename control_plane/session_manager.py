@@ -716,7 +716,7 @@ class SessionManager:
         async def on_question(req_id: str, msg: dict[str, Any]) -> dict[str, Any]:
             return await self._on_question(ms, req_id, msg)
 
-        agent_bin = self.env.cursor_agent_bin or self.app_config.acp.command
+        agent_bin = self.app_config.acp.command
         extra = list(self.app_config.acp.extra_args)
         api_key = self.env.cursor_api_key or None
 

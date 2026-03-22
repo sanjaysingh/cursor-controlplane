@@ -38,5 +38,5 @@ Implement `BaseChannel` (`channels/base.py`), register in `ChannelRegistry`, sta
 ## Configuration
 
 - `config.yaml`: repos, optional **`workspace_root`** (absolute or `~`; default **`~/cursor-control-plane`**), server bind, `acp.command` (default `agent`), `acp.default_model`, `acp.stream_update_mode`, `acp.extra_args`.
-- `.env`: `CURSOR_API_KEY`, `TELEGRAM_BOT_TOKEN`, optional `CURSOR_AGENT_BIN`, optional `CURSOR_AGENT_MODEL`, optional **`CONTROL_PLANE_WORKSPACE_ROOT`** (overrides `workspace_root` in YAML).
+- `.env`: `CURSOR_API_KEY`, `TELEGRAM_BOT_TOKEN`, optional `CURSOR_AGENT_MODEL`, optional **`CONTROL_PLANE_WORKSPACE_ROOT`** (overrides `workspace_root` in YAML).
 - **GitHub**: listing/cloning uses the **`gh`** CLI (`gh repo list`, `gh repo clone`); install `gh` and run `gh auth login` on the host running the control plane.

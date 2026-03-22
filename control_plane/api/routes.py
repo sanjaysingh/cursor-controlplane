@@ -100,7 +100,7 @@ async def list_repos(request: Request) -> JSONResponse:
 async def list_models(request: Request) -> JSONResponse:
     """Models from `agent models` / `--list-models` — exact strings valid for `agent --model <id>`."""
     st: AppState = request.app.state.control_plane
-    agent_bin = (st.env.cursor_agent_bin or st.config.acp.command or "agent").strip()
+    agent_bin = (st.config.acp.command or "agent").strip()
     api_key = (st.env.cursor_api_key or "").strip() or None
     models, err = await list_cursor_models(agent_bin, api_key)
     # One field only: dropdown label === value === CLI id (no separate display name).
@@ -151,7 +151,7 @@ async def list_models_acp(request: Request, workspace: str = "") -> JSONResponse
             }
         )
 
-    agent_bin = (st.env.cursor_agent_bin or st.config.acp.command or "agent").strip()
+    agent_bin = (st.config.acp.command or "agent").strip()
     api_key = (st.env.cursor_api_key or "").strip() or None
     extra = list(st.config.acp.extra_args)
     models, err, diagnostics = await probe_acp_model_options(

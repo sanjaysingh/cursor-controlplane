@@ -63,7 +63,6 @@ class EnvSettings(BaseSettings):
 
     cursor_api_key: str = ""
     telegram_bot_token: str = ""
-    cursor_agent_bin: str = ""
     cursor_agent_model: str = Field(
         default="",
         description="Optional default model (overrides acp.default_model; session.model still wins).",

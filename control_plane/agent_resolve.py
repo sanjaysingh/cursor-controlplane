@@ -76,7 +76,7 @@ def resolve_agent_executable(preferred: str) -> str:
     """
     Return a path or name suitable for subprocess argv[0].
 
-    `preferred` is usually CURSOR_AGENT_BIN or config `acp.command` (default ``agent``).
+    `preferred` is usually config ``acp.command`` (default ``agent``).
     """
     preferred = (preferred or "").strip()
     tried: list[str] = []
@@ -111,8 +111,8 @@ def resolve_agent_executable(preferred: str) -> str:
     hint = (
         "On Windows, open PowerShell where `agent --version` works and run:\n"
         "  (Get-Command agent).Source\n"
-        "Set CURSOR_AGENT_BIN to agent.cmd or agent.ps1 in that folder (both are supported).\n"
-        "Or add that folder to your **system** PATH so Python can find the CLI."
+        "Set `acp.command` in config.yaml to agent.cmd or agent.ps1 in that folder (both are supported),\n"
+        "or add that folder to your **user** or **system** PATH so Python can find the CLI."
     )
     if sys.platform == "win32":
         guess = _home_local_bin() / "agent.exe"

@@ -78,12 +78,14 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 The install script usually puts the CLI in **`%USERPROFILE%\.local\bin\agent.exe`**. Terminals you open often add that to `PATH`, but **Python / Cursor / services may not**, so the control plane cannot see `agent`.
 
-1. In PowerShell where `agent --version` works, run: **`(Get-Command agent).Source`**
-2. Put that path in **`.env`** if needed:  
-   `CURSOR_AGENT_BIN=C:\Users\You\AppData\Local\cursor-agent\agent.ps1`  
-   (Typical folder has **`agent.cmd`** + **`agent.ps1`**: we prefer **`.cmd`** via `cmd.exe /c`, else **`.ps1`** via PowerShell, else **`.exe`** if present.)
+The server also scans **`~/.local/bin`**, **`%USERPROFILE%\.local\bin`**, and **`%LOCALAPPDATA%\cursor-agent`** when resolving the CLI, which often fixes GUI-launched Python without extra configuration.
 
-Or add `%USERPROFILE%\.local\bin` to the **Windows user or system PATH** and restart the app.
+If it still fails:
+
+1. In PowerShell where `agent --version` works, run: **`(Get-Command agent).Source`**
+2. Add **`%USERPROFILE%\.local\bin`** (or that folder) to the **Windows user or system PATH** and restart the app, **or** set an explicit executable in **`config.yaml`**, for example:  
+   `acp.command: "C:\\Users\\You\\AppData\\Local\\cursor-agent\\agent.cmd"`  
+   (Typical install folder has **`agent.cmd`** + **`agent.ps1`**: we prefer **`.cmd`** via `cmd.exe /c`, else **`.ps1`** via PowerShell, else **`.exe`** if present.)
 
 ## Notes
 
