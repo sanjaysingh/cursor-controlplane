@@ -350,16 +350,7 @@ class AcpClient:
             },
         )
 
-    async def session_cancel(self) -> None:
-        if not self.session_id:
-            return
-        try:
-            await self.request("session/cancel", {"sessionId": self.session_id})
-        except Exception as e:
-            logger.warning("session/cancel failed (will still kill process): %s", e)
-
     async def cancel_and_kill(self, grace_seconds: float = 3.0) -> None:
-        await self.session_cancel()
         await self.kill(grace_seconds=grace_seconds)
 
     async def kill(self, grace_seconds: float = 3.0) -> None:

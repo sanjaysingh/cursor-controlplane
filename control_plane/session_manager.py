@@ -25,6 +25,19 @@ from control_plane.channels.registry import ChannelRegistry
 
 logger = logging.getLogger(__name__)
 
+MAX_AGENT_SESSIONS = 5
+
+
+class SessionLimitError(Exception):
+    """Total `agent_sessions` rows would exceed ``MAX_AGENT_SESSIONS``."""
+
+    def __str__(self) -> str:  # noqa: D105
+        return (
+            f"Maximum {MAX_AGENT_SESSIONS} sessions reached. "
+            "Close one before creating a new session."
+        )
+
+
 # Cursor ACP `cursor/*` methods that are sync/notification, not real user questions.
 _CURSOR_AUTO_ACK_METHODS = frozenset({"cursor/update_todos"})
 
@@ -189,6 +202,8 @@ class SessionManager:
         self._session_create_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._stream_buffers: dict[str, str] = defaultdict(str)
         self._flush_tasks: dict[str, asyncio.Task[None] | None] = {}
+        # Normalized `agent --model` id from DB `app_settings.default_model` (see refresh_db_default_model).
+        self._db_default_model: str | None = None
 
     def set_telegram_repo(self, chat_id: str, repo_path: str) -> None:
         self._telegram_repo[str(chat_id)] = repo_path
@@ -238,6 +253,8 @@ class SessionManager:
         self.set_telegram_repo(cid, new_resolved)
 
     def _repo_name_for_path(self, path: str) -> str:
+        if not (path or "").strip():
+            return "No repository"
         for r in self.app_config.repos:
             if Path(r.path).resolve() == Path(path).resolve():
                 return r.name
@@ -256,8 +273,32 @@ class SessionManager:
                 return str(Path(first.path).resolve())
         return None
 
+    async def refresh_db_default_model(self) -> None:
+        """Load `default_model` from app_settings into ``_db_default_model`` (normalized id or None)."""
+        from control_plane.model_cli import cli_model_id_for_argv
+
+        raw = await self.db.get_setting("default_model")
+        s = (raw or "").strip()
+        if not s:
+            self._db_default_model = None
+            return
+        mid = cli_model_id_for_argv(s)
+        self._db_default_model = mid if mid is not None else s
+
+    async def set_default_model_preference(self, model: str | None) -> None:
+        """Persist global default `agent --model` for new sessions and ACP fallback; empty = Auto."""
+        from control_plane.model_cli import cli_model_id_for_argv
+
+        s = (model or "").strip()
+        if not s:
+            await self.db.set_setting("default_model", "")
+        else:
+            mid = cli_model_id_for_argv(s)
+            await self.db.set_setting("default_model", mid if mid is not None else s)
+        await self.refresh_db_default_model()
+
     def _effective_model(self, ms: ManagedAgentSession) -> str | None:
-        """Resolved `agent --model`: session → env → config (ids only, never `id - label`)."""
+        """Resolved `agent --model`: session → DB default → env → config (ids only, never `id - label`)."""
         from control_plane.model_cli import cli_model_id_for_argv
 
         if ms.model and ms.model.strip():
@@ -265,6 +306,8 @@ class SessionManager:
             if mid is not None:
                 return mid
             # Session stored a placeholder like `current` — treat as unset; use env/config.
+        if self._db_default_model:
+            return self._db_default_model
         env_m = (self.env.cursor_agent_model or "").strip()
         if env_m:
             return cli_model_id_for_argv(env_m)
@@ -329,9 +372,18 @@ class SessionManager:
         title: str = "",
         model: str | None = None,
     ) -> AgentSessionPublic:
-        repo_path = str(Path(repo_path).resolve())
+        if await self.db.count_agent_sessions() >= MAX_AGENT_SESSIONS:
+            raise SessionLimitError()
+        await self.refresh_db_default_model()
+        rp = (repo_path or "").strip()
+        if rp:
+            repo_path = str(Path(rp).resolve())
+        else:
+            repo_path = ""
         sid = str(uuid.uuid4())
         m = _normalize_session_model(model)
+        if m is None:
+            m = self._db_default_model
         effective_title = self._session_title_from_repo_path(repo_path, title)
         await self.db.insert_agent_session(sid, channel, channel_key, repo_path, effective_title, model=m)
         # insert_agent_session also ensures creator as session_participants row
@@ -397,6 +449,7 @@ class SessionManager:
         return await self.db.list_session_messages(session_id, limit=limit)
 
     async def close_session(self, session_id: str) -> bool:
+        """Stop the agent, notify participants, then remove the session and its messages from the DB."""
         try:
             ms = await self.ensure_managed(session_id)
         except KeyError:
@@ -409,11 +462,7 @@ class SessionManager:
                 except Exception as e:
                     logger.warning("close_session kill: %s", e)
                 ms.client = None
-            ms.status = "closed"
             ms.activity = AgentActivity.idle
-            ms.closed_at = utcnow().isoformat()
-            await self.db.close_agent_session_row(session_id)
-            await self._emit_session(ms, closed=True)
             parts = await self._all_participants(ms)
             for ch_name, conv_id in parts:
                 try:
@@ -421,6 +470,8 @@ class SessionManager:
                     await ch.send_message(conv_id, "Session closed. The Cursor agent process was stopped.")
                 except Exception:
                     pass
+            await self.db.delete_agent_session(session_id)
+            await self.hub.publish({"type": "session_removed", "session_id": session_id})
         self._managed.pop(session_id, None)
         for k in list(self._stream_buffers.keys()):
             if k.startswith(f"{session_id}:"):
@@ -442,24 +493,15 @@ class SessionManager:
                 count += 1
         return count
 
-    async def close_all_open_sessions_globally(self) -> int:
-        """Close every open session (single-tenant operator; all channels)."""
-        rows = await self.db.list_all_open_sessions()
-        count = 0
-        for r in rows:
-            if await self.close_session(r["id"]):
-                count += 1
-        return count
-
-    async def purge_all_sessions(self) -> int:
-        """Kill all live processes, delete all sessions + messages from DB. Returns count deleted."""
+    async def close_all_sessions_globally(self) -> int:
+        """Kill all live agents and delete every session row (same as legacy purge-all)."""
         for sid, ms in list(self._managed.items()):
             await self._cancel_all_pending_questions(sid)
             if ms.client:
                 try:
                     await ms.client.cancel_and_kill()
                 except Exception as e:
-                    logger.warning("purge_all kill %s: %s", sid, e)
+                    logger.warning("close_all kill %s: %s", sid, e)
                 ms.client = None
         self._managed.clear()
         self._flush_tasks.clear()
@@ -519,7 +561,7 @@ class SessionManager:
             ch = self.registry.get(msg.channel)
             await ch.send_message(
                 msg.conversation_id,
-                "No valid repo path. Set `/repo <path>` (Telegram) or configure repos in config.yaml.",
+                "No valid repo path. Use /session_new, /workspaces, /repos (Telegram) or configure repos in config.yaml.",
             )
             return None
 
@@ -529,7 +571,13 @@ class SessionManager:
             if row:
                 session_id = row["id"]
             else:
-                pub = await self.create_session(msg.channel, msg.conversation_id, repo_path, "")
+                ch = self.registry.get(msg.channel)
+                try:
+                    pub = await self.create_session(msg.channel, msg.conversation_id, repo_path, "")
+                except SessionLimitError as e:
+                    if ch:
+                        await ch.send_message(msg.conversation_id, str(e))
+                    return None
                 session_id = pub.id
 
         await self.db.ensure_session_participant(session_id, msg.channel, msg.conversation_id)
@@ -720,8 +768,10 @@ class SessionManager:
         extra = list(self.app_config.acp.extra_args)
         api_key = self.env.cursor_api_key or None
 
+        ws = (ms.repo_path or "").strip()
+        agent_workspace = ws if ws else str(self.workspace_root_path())
         client = AcpClient(
-            workspace=ms.repo_path,
+            workspace=agent_workspace,
             agent_executable=agent_bin,
             extra_args=extra,
             api_key=api_key,

@@ -16,7 +16,10 @@ function dashboard() {
     webChannelKey: "web:default",
     newRepoPath: "",
     newSessionModel: "",
-    includeClosed: true,
+    /** Persisted default `agent --model` for new sessions (from GET /api/dashboard-config). */
+    defaultModelPreference: "",
+    defaultModelSaving: false,
+    maxSessions: 5,
     sessions: [],
     selectedSessionId: null,
     selectedStatus: "",
@@ -60,13 +63,8 @@ function dashboard() {
       return String(s.model).trim();
     },
 
-    /** Sidebar actions — must not use `=>` in inline HTML (breaks attribute parsing). */
-    get hasOpenSessions() {
-      return Array.isArray(this.sessions) && this.sessions.some((s) => s.status === "open");
-    },
-
-    get hasAnySessions() {
-      return Array.isArray(this.sessions) && this.sessions.length > 0;
+    get atSessionLimit() {
+      return Array.isArray(this.sessions) && this.sessions.length >= this.maxSessions;
     },
 
     async init() {
@@ -97,9 +95,41 @@ function dashboard() {
           if (d && d.workspace_root) {
             this.workspaceRoot = String(d.workspace_root);
           }
+          if (d && d.default_model !== undefined && d.default_model !== null) {
+            this.defaultModelPreference = String(d.default_model);
+          }
         }
       } catch {
         /* keep default */
+      }
+    },
+
+    async saveDefaultModel() {
+      this.error = "";
+      this.defaultModelSaving = true;
+      try {
+        const res = await fetch("/api/settings/default-model", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: this.defaultModelPreference.trim() || null,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          this.error = data.error || res.statusText;
+          return;
+        }
+        if (data.default_model !== undefined) {
+          this.defaultModelPreference = String(data.default_model || "");
+        }
+        this.newSessionModel = this.defaultModelPreference;
+        await this.$nextTick();
+        this.syncModelSelects();
+      } catch (e) {
+        this.error = String(e);
+      } finally {
+        this.defaultModelSaving = false;
       }
     },
 
@@ -217,6 +247,7 @@ function dashboard() {
         console.error("[cp-models] fetch failed", e);
       }
       this.modelsLoading = false;
+      this.newSessionModel = this.defaultModelPreference || "";
       await this.$nextTick();
       await this.$nextTick();
       this.syncModelSelects();
@@ -228,7 +259,8 @@ function dashboard() {
      */
     syncModelSelects() {
       const fill = () => {
-        this._fillModelSelect(this.$refs.newSessionModelSelect, this.availableModels, this.newSessionModel, true);
+        this._fillModelSelect(this.$refs.newSessionModelSelect, this.availableModels, this.newSessionModel, false);
+        this._fillModelSelect(this.$refs.defaultModelSelect, this.availableModels, this.defaultModelPreference, true);
       };
       this.$nextTick(() => {
         fill();
@@ -333,6 +365,18 @@ function dashboard() {
         } catch {
           return;
         }
+        if (msg.type === "session_removed") {
+          const sid = msg.session_id;
+          this.sessions = this.sessions.filter((s) => s.id !== sid);
+          if (this.selectedSessionId === sid) {
+            this.selectedSessionId = null;
+            this.selectedStatus = "";
+            this.messages = [];
+            this.streamText = "";
+            this.pendingQuestion = null;
+            this.awaitingAgentReply = false;
+          }
+        }
         if (msg.type === "session_updated" || msg.type === "session_closed") {
           this.mergeSession(msg.session);
           if (
@@ -394,29 +438,34 @@ function dashboard() {
       this.$nextTick(() => this.syncModelSelects());
     },
 
-    q() {
-      return `include_closed=${this.includeClosed}`;
-    },
-
     async refreshSessions() {
-      const res = await fetch("/api/sessions?" + this.q());
+      const res = await fetch("/api/sessions");
       this.sessions = await res.json();
     },
 
     async createSession() {
       this.error = "";
+      const repoPath = String(this.newRepoPath ?? "").trim();
       const res = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          repo_path: this.newRepoPath,
+          // Always a string (never JSON null): older Pydantic `repo_path: str` rejects null with 422.
+          repo_path: repoPath,
           title: "",
           model: this.newSessionModel.trim() || null,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        this.error = data.error || res.statusText;
+        if (res.status === 422 && Array.isArray(data.detail)) {
+          this.error = data.detail
+            .map((d) => `${(d.loc && d.loc.join) ? d.loc.join(".") : ""}: ${d.msg || d.type || ""}`)
+            .join("; ")
+            .trim() || JSON.stringify(data.detail);
+        } else {
+          this.error = data.error || res.statusText;
+        }
         return;
       }
       this.mergeSession(data);
@@ -512,8 +561,21 @@ function dashboard() {
 
     async closeSession() {
       if (!this.selectedSessionId) return;
-      await fetch(`/api/sessions/${encodeURIComponent(this.selectedSessionId)}/close`, { method: "POST" });
-      this.selectedStatus = "closed";
+      const id = this.selectedSessionId;
+      const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/close`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        this.error = data.error || res.statusText;
+        return;
+      }
+      if (this.selectedSessionId === id) {
+        this.selectedSessionId = null;
+        this.selectedStatus = "";
+        this.messages = [];
+        this.streamText = "";
+        this.pendingQuestion = null;
+        this.awaitingAgentReply = false;
+      }
       await this.refreshSessions();
     },
 
@@ -521,21 +583,18 @@ function dashboard() {
       this.error = "";
       const res = await fetch("/api/sessions/close-all", { method: "POST" });
       const data = await res.json();
-      if (!res.ok) { this.error = data.error || res.statusText; return; }
-      await this.refreshSessions();
-    },
-
-    async purgeAllSessions() {
-      this.error = "";
-      const res = await fetch("/api/sessions/purge", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) { this.error = data.error || res.statusText; return; }
+      if (!res.ok) {
+        this.error = data.error || res.statusText;
+        return;
+      }
       this.sessions = [];
       this.selectedSessionId = null;
       this.selectedStatus = "";
       this.messages = [];
       this.streamText = "";
+      this.pendingQuestion = null;
       this.awaitingAgentReply = false;
+      await this.refreshSessions();
       await this.loadRepoPicker();
     },
 
@@ -553,3 +612,4 @@ function dashboard() {
     },
   };
 }
+

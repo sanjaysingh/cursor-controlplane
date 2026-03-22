@@ -10,13 +10,16 @@ from pathlib import Path
 from typing import Any
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
 from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from control_plane.agent_models import list_cursor_models
 from control_plane.channels.base import BaseChannel
 from control_plane.github_cli import gh_repo_clone, gh_repo_list
 from control_plane.models import IncomingMessage, MessageTarget
-from control_plane.session_manager import SessionManager
+from control_plane.session_manager import SessionLimitError, SessionManager
+from control_plane.telegram_format import markdown_to_telegram_plain_and_entities
 from control_plane.workspace_paths import list_top_level_workspaces
 
 logger = logging.getLogger(__name__)
@@ -36,6 +39,8 @@ class TelegramChannel(BaseChannel):
         # chat_id -> ordered list for inline keyboard callbacks (index -> value)
         self._pending_github_repos: dict[str, list[str]] = {}
         self._pending_workspace_paths: dict[str, list[str]] = {}
+        # chat_id -> model ids in order shown by last /models (for md: callbacks)
+        self._telegram_model_ids: dict[str, list[str]] = {}
 
     @staticmethod
     def _question_cb_token(session_id: str, conversation_id: str) -> str:
@@ -57,10 +62,11 @@ class TelegramChannel(BaseChannel):
         async def cmd_start(message: Message) -> None:
             await message.answer(
                 "Cursor Control Plane.\n"
-                "/repo <path> — set workspace manually\n"
                 "/repos — GitHub repos (gh CLI); tap to clone & use\n"
                 "/workspaces — folders under your workspace root; tap to use\n"
                 "/sessions — list & connect to any session\n"
+                "/session_new — new chat at workspace root (same as web “No repository”)\n"
+                "/models — CLI models; tap to set default for new sessions\n"
                 "Send text — continues the connected/active session.\n"
                 "/session_close — stop the current agent"
             )
@@ -77,7 +83,6 @@ class TelegramChannel(BaseChannel):
                 await message.answer("No repos returned. Try `gh repo list` locally.")
                 return
             owners: list[str] = []
-            lines: list[str] = []
             buttons: list[list[InlineKeyboardButton]] = []
             for i, r in enumerate(rows):
                 nwo = r.get("nameWithOwner") if isinstance(r, dict) else None
@@ -85,29 +90,13 @@ class TelegramChannel(BaseChannel):
                     continue
                 nwo = nwo.strip()
                 owners.append(nwo)
-                lines.append(f"• {nwo}")
                 cb = f"gr:{i}"
                 if len(cb) <= 64:
                     buttons.append([InlineKeyboardButton(text=nwo[:62], callback_data=cb)])
             self._pending_github_repos[chat_id] = owners
-            text = "GitHub repos — tap to clone (if needed) and set workspace:\n" + "\n".join(lines)
+            text = "GitHub repos — tap to clone (if needed) and set workspace:"
             kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
             await message.answer(text[:4000], reply_markup=kb)
-
-        @dp.message(Command("repo"))
-        async def cmd_repo(message: Message) -> None:
-            assert message.text and message.chat
-            parts = message.text.split(maxsplit=1)
-            if len(parts) < 2:
-                await message.answer("Usage: /repo C:/path/to/repo")
-                return
-            raw = parts[1].strip().strip('"')
-            path = Path(raw)
-            if not path.is_dir():
-                await message.answer(f"Not a directory: {raw}")
-                return
-            sm.set_telegram_repo(str(message.chat.id), str(path.resolve()))
-            await message.answer(f"Repo set to {path.resolve()}")
 
         @dp.message(Command("status"))
         async def cmd_status(message: Message) -> None:
@@ -138,7 +127,6 @@ class TelegramChannel(BaseChannel):
                 )
                 return
             paths: list[str] = []
-            lines: list[str] = []
             buttons: list[list[InlineKeyboardButton]] = []
             for i, e in enumerate(entries[:40]):
                 name = e.get("name") or ""
@@ -146,12 +134,11 @@ class TelegramChannel(BaseChannel):
                 if not path:
                     continue
                 paths.append(path)
-                lines.append(f"• {name}")
                 cb = f"ws:{i}"
                 if len(cb) <= 64:
                     buttons.append([InlineKeyboardButton(text=name[:62], callback_data=cb)])
             self._pending_workspace_paths[chat_id] = paths
-            text = f"Workspaces under {root} — tap to use:\n" + "\n".join(lines)
+            text = f"Workspaces under {root} — tap to use:"
             kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
             await message.answer(text[:4000], reply_markup=kb)
 
@@ -165,16 +152,103 @@ class TelegramChannel(BaseChannel):
                 return
             active = sm.get_telegram_active_session(chat_id)
             buttons: list[list[InlineKeyboardButton]] = []
-            lines: list[str] = []
             for s in sessions:
                 marker = "▶ " if s.id == active else ""
                 label = f"{marker}{self._session_summary(s)}"
-                lines.append(f"{label}  ({s.activity})")
+                btn_text = f"{label} ({s.activity})"[:62]
                 cb = f"sess:{s.id}"
                 if len(cb) <= 64:
-                    buttons.append([InlineKeyboardButton(text=label[:62], callback_data=cb)])
+                    buttons.append([InlineKeyboardButton(text=btn_text, callback_data=cb)])
             kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
-            await message.answer("Sessions — tap to connect:\n" + "\n".join(lines), reply_markup=kb)
+            await message.answer("Sessions — tap to connect:", reply_markup=kb)
+
+        @dp.message(Command("session_new"))
+        async def cmd_session_new(message: Message) -> None:
+            assert message.chat
+            chat_id = str(message.chat.id)
+            root = sm.workspace_root_path()
+            try:
+                pub = await sm.create_session("telegram", chat_id, "", "")
+            except SessionLimitError as e:
+                await message.answer(str(e))
+                return
+            sm.set_telegram_active_session(chat_id, pub.id)
+            m = pub.model or "Auto"
+            await message.answer(
+                "New session at workspace root (same as web: no repository folder).\n\n"
+                f"Workspace: {root}\n"
+                f"Session: {pub.id[:8]}… — {pub.title}\n"
+                f"Model: {m}\n\n"
+                "Send a message to talk to the agent. Use /session_close to stop."
+            )
+
+        @dp.message(Command("models"))
+        async def cmd_models(message: Message) -> None:
+            assert message.chat
+            chat_id = str(message.chat.id)
+            agent_bin = (sm.app_config.acp.command or "agent").strip()
+            api_key = (sm.env.cursor_api_key or "").strip() or None
+            models, err = await list_cursor_models(agent_bin, api_key)
+            if err:
+                await message.answer(f"Could not list models: {err}")
+                return
+            cur = await sm.db.get_setting("default_model") or ""
+            auto_btn = [InlineKeyboardButton(text="Auto (no --model)", callback_data="md:clear")]
+            ids: list[str] = []
+            buttons: list[list[InlineKeyboardButton]] = [auto_btn]
+            for m in models:
+                if len(ids) >= 80:
+                    break
+                mid = (m.get("id") or "").strip() if isinstance(m, dict) else ""
+                if not mid:
+                    continue
+                ids.append(mid)
+                idx = len(ids) - 1
+                cb = f"md:{idx}"
+                if len(cb) <= 64:
+                    buttons.append([InlineKeyboardButton(text=mid[:62], callback_data=cb)])
+            self._telegram_model_ids[chat_id] = ids
+            if not ids:
+                text = (
+                    "No model ids from the CLI.\n\n"
+                    f"Current default: {cur or 'Auto'}"
+                )
+                kb = InlineKeyboardMarkup(inline_keyboard=[auto_btn])
+                await message.answer(text[:4000], reply_markup=kb)
+                return
+            text = (
+                "Models — tap to set default for new sessions (same as GET /api/models):\n"
+                f"Current default: {cur or 'Auto'}"
+            )
+            kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+            await message.answer(text[:4000], reply_markup=kb)
+
+        @dp.callback_query(F.data.startswith("md:"))
+        async def on_model_pick(cb: CallbackQuery) -> None:
+            data = cb.data or ""
+            if not cb.message:
+                await cb.answer()
+                return
+            chat_id = str(cb.message.chat.id)
+            suffix = data.split(":", 1)[1] if ":" in data else ""
+            if suffix == "clear":
+                await sm.set_default_model_preference(None)
+                await cb.answer("Default cleared")
+                await cb.message.answer("Default model cleared (Auto).")
+                return
+            try:
+                idx = int(suffix)
+            except ValueError:
+                await cb.answer()
+                return
+            lst = self._telegram_model_ids.get(chat_id)
+            if not lst or not (0 <= idx < len(lst)):
+                await cb.answer("List expired — send /models again.", show_alert=True)
+                return
+            model_id = lst[idx]
+            await sm.set_default_model_preference(model_id)
+            await cb.answer("OK")
+            await cb.message.answer(f"Default model set to:\n{model_id}")
 
         @dp.message(Command("session_close"))
         async def cmd_session_close(message: Message) -> None:
@@ -188,7 +262,9 @@ class TelegramChannel(BaseChannel):
                 return
             repo = sm.get_telegram_repo(chat_id)
             if not repo:
-                await message.answer("Set /repo or use /workspaces / /repos first, or use /sessions to connect.")
+                await message.answer(
+                    "Use /session_new, /workspaces, /repos, or /sessions to pick a workspace or session."
+                )
                 return
             repo_resolved = str(Path(repo).resolve())
             row = await sm.db.find_open_agent_session("telegram", chat_id, repo_resolved)
@@ -312,11 +388,12 @@ class TelegramChannel(BaseChannel):
         await self._bot.set_my_commands([
             BotCommand(command="start", description="Show help"),
             BotCommand(command="sessions", description="List sessions & connect"),
+            BotCommand(command="session_new", description="New session at workspace root"),
+            BotCommand(command="models", description="List models & set default"),
             BotCommand(command="session_close", description="Stop current agent"),
             BotCommand(command="status", description="Show open sessions"),
             BotCommand(command="repos", description="GitHub repos (gh)"),
             BotCommand(command="workspaces", description="Local workspace folders"),
-            BotCommand(command="repo", description="Set workspace path"),
         ])
         self._task = asyncio.create_task(dp.start_polling(self._bot))
 
@@ -338,13 +415,27 @@ class TelegramChannel(BaseChannel):
         self._bot = None
         self._dp = None
 
+    async def _send_plain_chunks(self, chat_id: int, plain: str) -> None:
+        if not self._bot or not plain:
+            return
+        for i in range(0, len(plain), 4096):
+            await self._bot.send_message(chat_id, plain[i : i + 4096])
+
     async def send_message(self, conversation_id: str, text: str) -> None:
         if not self._bot:
             return
         chat_id = int(conversation_id)
-        chunk = text[:4000] if text else ""
-        if chunk:
-            await self._bot.send_message(chat_id, chunk)
+        if not text:
+            return
+        plain, entities = markdown_to_telegram_plain_and_entities(text)
+        if entities is not None and len(plain) <= 4096:
+            try:
+                await self._bot.send_message(chat_id, plain, entities=entities)
+            except TelegramBadRequest as e:
+                logger.warning("Telegram rejected formatted message, sending plain: %s", e)
+                await self._send_plain_chunks(chat_id, plain)
+            return
+        await self._send_plain_chunks(chat_id, plain)
 
     async def ask_question(
         self,
@@ -374,7 +465,15 @@ class TelegramChannel(BaseChannel):
             buttons.append(row)
         kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
         chat_id = int(conversation_id)
-        await self._bot.send_message(chat_id, question[:3500], reply_markup=kb)
+        q_plain, q_entities = markdown_to_telegram_plain_and_entities(question)
+        if q_entities is not None and len(q_plain) <= 4096:
+            try:
+                await self._bot.send_message(chat_id, q_plain, entities=q_entities, reply_markup=kb)
+            except TelegramBadRequest as e:
+                logger.warning("Telegram rejected formatted question, sending plain: %s", e)
+                await self._bot.send_message(chat_id, q_plain, reply_markup=kb)
+        else:
+            await self._bot.send_message(chat_id, q_plain[:4096], reply_markup=kb)
         try:
             return await asyncio.wait_for(fut, timeout=3600.0)
         except asyncio.TimeoutError:

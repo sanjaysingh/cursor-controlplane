@@ -32,6 +32,8 @@ async def lifespan(app: FastAPI):
     for r in st.config.repos:
         await st.db.upsert_repo(r.name, r.path, r.description)
 
+    await st.session_manager.refresh_db_default_model()
+
     wr = resolve_workspace_root(st.config, st.env)
     wr.mkdir(parents=True, exist_ok=True)
     logger.info("Workspace root: %s", wr)

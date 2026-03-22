@@ -20,9 +20,11 @@ pip install -r requirements.txt
 copy .env.example .env   # set CURSOR_API_KEY, TELEGRAM_BOT_TOKEN
 ```
 
+**Virtual environment:** If you **move or copy** this project to a new folder, **do not copy `.venv`**. It embeds absolute paths and will confuse `python` / `pip`. Stop any running `python run.py` (and close terminals that activated this env), delete the `.venv` folder, then run `python -m venv .venv` and `pip install -r requirements.txt` again. If Windows says “access denied” on delete, end the Python processes in Task Manager or reboot, then remove `.venv`.
+
 Edit `config.yaml`:
 
-- Add one or more `repos` entries (name + path), or rely on Telegram `/repo`, **`/workspaces`**, **`/repos`**, or the web sidebar. Optional **`workspace_root`** (default **`~/cursor-control-plane`**) or env **`CONTROL_PLANE_WORKSPACE_ROOT`**.
+- Add one or more `repos` entries (name + path), or rely on Telegram **`/workspaces`**, **`/repos`**, or the web sidebar. Optional **`workspace_root`** (default **`~/cursor-control-plane`**) or env **`CONTROL_PLANE_WORKSPACE_ROOT`**.
 - Toggle `channels.telegram.enabled` / `channels.web.enabled`.
 - Optional: `acp.default_model` (global `agent --model`), `acp.stream_update_mode` (`agent_message_chunk_only` vs `all` — see [ACP docs](https://cursor.com/docs/cli/acp)).
 
@@ -48,26 +50,27 @@ python run.py
 ## How sessions work
 
 - **Workspace is per session**: each session stores a `repo_path`; the agent runs with that cwd until the session is closed.
+- **At most 5 sessions** total; close one before creating another.
 - **Chat title**: defaults to the **workspace folder name** (last segment of `repo_path`). Pass `title` on **`POST /api/sessions`** to override.
 - **One ACP process per open session**: follow-up messages use `session_prompt` on the same client — not a new subprocess per message.
 - **Model**: set **only when creating** a session — exact `agent --model` id, or **Auto** (omit `--model`). It cannot be changed after creation. If unset at creation, `CURSOR_AGENT_MODEL` / `acp.default_model` can still apply when spawning (see `session_manager._effective_model`).
-- **Close** ends the CLI for that session only. **Closed sessions** stay in the list; sending a message **reopens** them and tries **`session_load`** with the saved ACP session id.
+- **Close** stops the agent and **removes** that session and its messages from the database (no separate “purge”).
 
 ## Telegram usage
 
 1. Start the server with `TELEGRAM_BOT_TOKEN` set.
 2. Open your bot, send `/start`.
-3. **`/repos`** — GitHub repos (`gh`) · **`/workspaces`** — local folders under the workspace root · **`/repo`** — set path manually.
+3. **`/session_new`** — new chat at **workspace root** only (same as web **No repository**) · **`/repos`** — GitHub repos (`gh`) · **`/workspaces`** — local folders under the workspace root.
 4. Plain messages continue the **open session** for that repo (same agent process until you close it).
 5. **`/sessions`** — list and connect · **`/session_close`** — stop the agent for this chat · Choosing a repo or workspace sets the folder and starts a **new** session on your **next** message.
 
 ## Web usage
 
 1. Open the dashboard; your browser gets a stable **client id** (localStorage) so sessions are scoped to you.
-2. **Sidebar**: **New session** first (repository **dropdown** via `GET /api/repo-picker`, optional **model**), then **Sessions** history below.
-3. **Select any session** to load history and **resume**; the session header shows the model chosen at creation (read-only).
+2. **Sidebar**: set **Default model** (saved in SQLite, `PUT /api/settings/default-model`) if you want new sessions to use a fixed `agent --model` id; then **New session** (repository **dropdown** via `GET /api/repo-picker`, per-session **model** overrides for that create only). **Sessions** list below.
+3. **Select a session** to load history; the session header shows the model chosen at creation (read-only).
 4. Type in the chat box to send.
-5. **Close session** stops the agent subprocess for that session. You can still select it later and send to reopen.
+5. **Close session** stops the agent and deletes that chat. **Close all** removes every session.
 6. When the agent asks a question, answer from the dashboard for that session.
 
 ## Architecture

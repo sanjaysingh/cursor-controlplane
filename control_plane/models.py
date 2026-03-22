@@ -45,7 +45,7 @@ class AgentSessionPublic(BaseModel):
     acp_session_id: str | None = None
     model: str | None = Field(
         default=None,
-        description="`agent --model` chosen at session creation; null = Auto / server default (config / env). Not mutable after create.",
+        description="`agent --model` at session creation; null = Auto / DB default / env / config. Not mutable after create.",
     )
     created_at: str
     updated_at: str
@@ -82,12 +82,29 @@ class CloneGithubRepoRequest(BaseModel):
 
 
 class CreateSessionRequest(BaseModel):
-    repo_path: str
+    """repo_path omitted or empty = no project folder (agent uses workspace root, like Cursor)."""
+
+    repo_path: str | None = None
     title: str = ""
     model: str | None = None
 
     @model_validator(mode="after")
     def _normalize_optional_model(self) -> CreateSessionRequest:
+        if self.repo_path is not None:
+            s = str(self.repo_path).strip()
+            self.repo_path = s if s else None
+        if self.model is not None and not str(self.model).strip():
+            self.model = None
+        return self
+
+
+class DefaultModelUpdateRequest(BaseModel):
+    """Persisted default `agent --model` for new sessions; null or empty = Auto."""
+
+    model: str | None = None
+
+    @model_validator(mode="after")
+    def _strip_optional(self) -> DefaultModelUpdateRequest:
         if self.model is not None and not str(self.model).strip():
             self.model = None
         return self

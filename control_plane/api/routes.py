@@ -15,12 +15,14 @@ from control_plane.models import (
     CloneGithubRepoRequest,
     CreateRunRequest,
     CreateSessionRequest,
+    DefaultModelUpdateRequest,
     SendSessionMessageRequest,
 )
 from control_plane.acp_model_probe import probe_acp_model_options
 from control_plane.agent_models import list_cursor_models
 from control_plane.github_cli import gh_repo_clone, gh_repo_list
 from control_plane.repo_picker import build_repo_picker_items
+from control_plane.session_manager import SessionLimitError
 from control_plane.state import AppState
 from control_plane.workspace_paths import list_top_level_workspaces, resolve_workspace_root
 
@@ -45,12 +47,23 @@ async def dashboard_config(request: Request) -> JSONResponse:
     """Web UI: fixed web identity (matches WEB_CHANNEL_KEY / default participant for streams)."""
     st: AppState = request.app.state.control_plane
     root = resolve_workspace_root(st.config, st.env)
+    dm = await st.db.get_setting("default_model")
     return JSONResponse(
         content={
             "web_channel_key": _web_channel_key(st),
             "workspace_root": str(root),
+            "default_model": (dm or "").strip(),
         }
     )
+
+
+@router.put("/settings/default-model")
+async def put_default_model(request: Request, body: DefaultModelUpdateRequest) -> JSONResponse:
+    """Persist global default `agent --model` for new sessions (empty = Auto)."""
+    st: AppState = request.app.state.control_plane
+    await st.session_manager.set_default_model_preference(body.model)
+    out = await st.db.get_setting("default_model")
+    return JSONResponse(content={"ok": True, "default_model": (out or "").strip()})
 
 
 @router.get("/workspaces")
@@ -190,7 +203,7 @@ async def list_models_acp(request: Request, workspace: str = "") -> JSONResponse
 @router.get("/sessions")
 async def list_sessions(
     request: Request,
-    include_closed: bool = True,
+    include_closed: bool = False,
 ) -> JSONResponse:
     st: AppState = request.app.state.control_plane
     sessions = await st.session_manager.list_all_sessions_global(
@@ -202,30 +215,28 @@ async def list_sessions(
 @router.post("/sessions")
 async def create_session(request: Request, body: CreateSessionRequest) -> JSONResponse:
     st: AppState = request.app.state.control_plane
-    p = Path(body.repo_path)
-    if not p.is_dir():
-        return JSONResponse(status_code=400, content={"error": "Not a valid directory"})
-    s = await st.session_manager.create_session(
-        "web",
-        _web_channel_key(st),
-        str(p.resolve()),
-        body.title,
-        model=body.model,
-    )
+    if body.repo_path:
+        p = Path(body.repo_path)
+        if not p.is_dir():
+            return JSONResponse(status_code=400, content={"error": "Not a valid directory"})
+    try:
+        s = await st.session_manager.create_session(
+            "web",
+            _web_channel_key(st),
+            body.repo_path or "",
+            body.title,
+            model=body.model,
+        )
+    except SessionLimitError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
     return JSONResponse(content=s.to_public_dict())
 
 
 @router.post("/sessions/close-all")
 async def close_all_sessions(request: Request) -> JSONResponse:
+    """Close every session: stop agents and delete all session rows (same as legacy purge-all)."""
     st: AppState = request.app.state.control_plane
-    count = await st.session_manager.close_all_open_sessions_globally()
-    return JSONResponse(content={"ok": True, "closed": count})
-
-
-@router.post("/sessions/purge")
-async def purge_all_sessions(request: Request) -> JSONResponse:
-    st: AppState = request.app.state.control_plane
-    count = await st.session_manager.purge_all_sessions()
+    count = await st.session_manager.close_all_sessions_globally()
     return JSONResponse(content={"ok": True, "deleted": count})
 
 

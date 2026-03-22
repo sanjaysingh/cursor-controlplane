@@ -75,6 +75,11 @@ CREATE TABLE IF NOT EXISTS session_participants (
 );
 
 CREATE INDEX IF NOT EXISTS idx_session_participants_conv ON session_participants(channel, conversation_id);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -326,6 +331,26 @@ class Database:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
+    async def count_agent_sessions(self) -> int:
+        self._ensure_parent()
+        async with aiosqlite.connect(self.path) as conn:
+            cur = await conn.execute("SELECT COUNT(*) FROM agent_sessions")
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
+    async def delete_agent_session(self, session_id: str) -> bool:
+        """Remove one session and its messages/participants. Returns True if the session existed."""
+        self._ensure_parent()
+        async with aiosqlite.connect(self.path) as conn:
+            cur = await conn.execute("SELECT 1 FROM agent_sessions WHERE id = ?", (session_id,))
+            if await cur.fetchone() is None:
+                return False
+            await conn.execute("DELETE FROM session_messages WHERE session_id = ?", (session_id,))
+            await conn.execute("DELETE FROM session_participants WHERE session_id = ?", (session_id,))
+            await conn.execute("DELETE FROM agent_sessions WHERE id = ?", (session_id,))
+            await conn.commit()
+            return True
+
     async def delete_all_sessions(self) -> int:
         """Hard-delete all session rows and their messages. Returns count deleted."""
         self._ensure_parent()
@@ -459,6 +484,25 @@ class Database:
             )
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
+
+    async def get_setting(self, key: str) -> str | None:
+        self._ensure_parent()
+        async with aiosqlite.connect(self.path) as conn:
+            cur = await conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+            row = await cur.fetchone()
+            if row is None:
+                return None
+            v = row[0]
+            return str(v) if v is not None else None
+
+    async def set_setting(self, key: str, value: str) -> None:
+        self._ensure_parent()
+        async with aiosqlite.connect(self.path) as conn:
+            await conn.execute(
+                "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+            await conn.commit()
 
 
 def stable_conversation_id(channel: str, channel_conversation_id: str, repo_path: str) -> str:
