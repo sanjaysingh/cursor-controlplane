@@ -34,7 +34,7 @@
       },
     };
   </script>
-  <link rel="stylesheet" href="/assets/style.css?v=2" />
+  <link rel="stylesheet" href="/assets/style.css?v=3" />
   <!-- Markdown render + XSS-safe HTML (load before Alpine / app.js) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
@@ -48,6 +48,9 @@
   >
     <!-- Sidebar -->
     <aside
+      id="sidebar-panel"
+      x-show="!sidebarCollapsed"
+      x-cloak
       class="flex max-h-[min(85vh,720px)] w-full min-h-0 shrink-0 flex-col overflow-hidden border-b border-surface-700/80 bg-surface-900/80 shadow-panel backdrop-blur-xl md:h-full md:max-h-full md:max-w-[22rem] md:border-b-0 md:border-r"
     >
       <div class="border-b border-surface-700/60 p-5">
@@ -64,7 +67,7 @@
         </div>
       </div>
 
-      <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overflow-x-hidden overscroll-contain p-4">
+      <div class="cp-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overflow-x-hidden overscroll-contain p-4">
         <!-- Default model: first — options filled by JS (same as new-session model); id avoids Alpine x-ref timing issues -->
         <div class="shrink-0 rounded-xl border border-surface-700/60 bg-surface-850/50 p-4 shadow-inner">
           <h2 class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Default model</h2>
@@ -175,8 +178,8 @@
           </button>
         </div>
 
-        <!-- Sessions history: flex-1 so list fills space below New session -->
-        <div class="flex min-h-[200px] flex-1 flex-col overflow-hidden md:min-h-0">
+        <!-- Sessions: flows with content; sidebar body above scrolls as one unit -->
+        <div class="flex shrink-0 flex-col">
           <div class="mb-2 flex shrink-0 items-start justify-between gap-2 px-1">
             <div class="min-w-0 flex-1">
               <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-500">Sessions</h2>
@@ -190,7 +193,7 @@
               title="Close and remove all sessions"
             >Close all</button>
           </div>
-          <div class="session-scroll min-h-0 flex-1 overflow-y-auto pr-1">
+          <div class="pr-1">
             <template x-if="!sessions || sessions.length === 0">
               <p class="rounded-lg border border-dashed border-surface-700/80 bg-surface-850/30 px-3 py-8 text-center text-xs text-slate-500">
                 No sessions yet. Create one above.
@@ -232,6 +235,39 @@
       <!-- Top bar -->
       <header class="flex items-center justify-between gap-4 border-b border-surface-700/60 bg-surface-900/40 px-4 py-3 backdrop-blur-sm sm:px-6">
         <div class="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            @click="toggleSidebar()"
+            class="btn-secondary shrink-0 rounded-lg border border-surface-600/80 bg-surface-800/80 px-2.5 py-2 text-slate-300 transition hover:border-surface-500 hover:bg-surface-700/80"
+            :title="sidebarCollapsed ? 'Show side panel' : 'Hide side panel'"
+            :aria-expanded="!sidebarCollapsed"
+            aria-controls="sidebar-panel"
+          >
+            <span class="sr-only" x-text="sidebarCollapsed ? 'Show side panel' : 'Hide side panel'"></span>
+            <svg
+              x-show="!sidebarCollapsed"
+              class="h-5 w-5 text-slate-300"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 19.5L4.5 12l6.75-7.5M18.75 19.5L12 12l6.75-7.5" />
+            </svg>
+            <svg
+              x-show="sidebarCollapsed"
+              x-cloak
+              class="h-5 w-5 text-slate-300"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12.75 19.5l6.75-7.5-6.75-7.5M5.25 19.5L12 12 5.25 4.5" />
+            </svg>
+          </button>
           <div
             class="h-2 w-2 shrink-0 rounded-full transition-colors"
             :class="wsState === 'connected' ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-slate-600'"
@@ -404,6 +440,6 @@
       </div>
     </main>
   </div>
-  <script src="/assets/app.js?v=3"></script>
+  <script src="/assets/app.js?v=4"></script>
 </body>
 </html>

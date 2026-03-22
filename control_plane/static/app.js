@@ -45,6 +45,14 @@ function dashboard() {
     repoPickerError: "",
     repoPickerLoading: false,
     repoCloneBusy: false,
+    /** Hide sessions/settings column for full-width chat; persisted in localStorage. */
+    sidebarCollapsed: (() => {
+      try {
+        return localStorage.getItem("cp-sidebar-collapsed") === "true";
+      } catch {
+        return false;
+      }
+    })(),
 
     /** Send button — disabled while a message is in flight (draft cleared immediately on send). */
     get canSend() {
@@ -65,6 +73,15 @@ function dashboard() {
 
     get atSessionLimit() {
       return Array.isArray(this.sessions) && this.sessions.length >= this.maxSessions;
+    },
+
+    toggleSidebar() {
+      this.sidebarCollapsed = !this.sidebarCollapsed;
+      try {
+        localStorage.setItem("cp-sidebar-collapsed", this.sidebarCollapsed ? "true" : "false");
+      } catch {
+        /* ignore */
+      }
     },
 
     async init() {

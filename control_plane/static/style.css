@@ -145,25 +145,21 @@ select.input-field.input-select {
   box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.12);
 }
 
-.cp-scroll,
-.session-scroll {
+.cp-scroll {
   scrollbar-width: thin;
   scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
 }
 
-.cp-scroll::-webkit-scrollbar,
-.session-scroll::-webkit-scrollbar {
+.cp-scroll::-webkit-scrollbar {
   width: 6px;
 }
 
-.cp-scroll::-webkit-scrollbar-thumb,
-.session-scroll::-webkit-scrollbar-thumb {
+.cp-scroll::-webkit-scrollbar-thumb {
   background: rgba(100, 116, 139, 0.4);
   border-radius: 999px;
 }
 
-.cp-scroll::-webkit-scrollbar-thumb:hover,
-.session-scroll::-webkit-scrollbar-thumb:hover {
+.cp-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(100, 116, 139, 0.65);
 }
 
