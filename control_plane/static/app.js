@@ -33,6 +33,14 @@ function dashboard() {
     availableModels: [],
     modelsLoadError: "",
     modelsLoading: false,
+    /** Resolved server workspace root (from /api/dashboard-config). */
+    workspaceRoot: "",
+    /** Unified local + GitHub options from GET /api/repo-picker */
+    repoPickerItems: [],
+    selectedRepoPickId: "",
+    repoPickerError: "",
+    repoPickerLoading: false,
+    repoCloneBusy: false,
 
     /** Send button only — composer stays enabled whenever a session is selected */
     get canSend() {
@@ -47,6 +55,15 @@ function dashboard() {
       return String(s.model).trim();
     },
 
+    /** Sidebar actions — must not use `=>` in inline HTML (breaks attribute parsing). */
+    get hasOpenSessions() {
+      return Array.isArray(this.sessions) && this.sessions.some((s) => s.status === "open");
+    },
+
+    get hasAnySessions() {
+      return Array.isArray(this.sessions) && this.sessions.length > 0;
+    },
+
     async init() {
       if (typeof marked !== "undefined") {
         const m = /** @type {any} */ (marked);
@@ -58,6 +75,7 @@ function dashboard() {
         this.$nextTick(() => this._scrollMessagesEnd());
       });
       await this.loadDashboardConfig();
+      await this.loadRepoPicker();
       await this.refreshSessions();
       this.connectWs();
       await this.fetchModels();
@@ -71,9 +89,74 @@ function dashboard() {
           if (d && d.web_channel_key) {
             this.webChannelKey = String(d.web_channel_key);
           }
+          if (d && d.workspace_root) {
+            this.workspaceRoot = String(d.workspace_root);
+          }
         }
       } catch {
         /* keep default */
+      }
+    },
+
+    async loadRepoPicker() {
+      this.repoPickerError = "";
+      this.repoPickerLoading = true;
+      try {
+        const r = await fetch("/api/repo-picker?gh_limit=80");
+        const data = await r.json();
+        this.repoPickerItems = Array.isArray(data.items) ? data.items : [];
+        this.repoPickerError = data.error || "";
+      } catch (e) {
+        this.repoPickerError = String(e);
+        this.repoPickerItems = [];
+      } finally {
+        this.repoPickerLoading = false;
+      }
+    },
+
+    async onRepoPickerChange() {
+      const id = this.selectedRepoPickId;
+      if (!id) {
+        this.newRepoPath = "";
+        return;
+      }
+      const it = this.repoPickerItems.find((x) => x.id === id);
+      if (!it) {
+        this.newRepoPath = "";
+        return;
+      }
+      this.error = "";
+      if (it.kind === "local") {
+        this.newRepoPath = String(it.path || "");
+        return;
+      }
+      if (it.kind === "github" && it.nameWithOwner) {
+        this.repoCloneBusy = true;
+        this.newRepoPath = "";
+        try {
+          const res = await fetch("/api/github/clone", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nameWithOwner: it.nameWithOwner }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            this.error = data.error || res.statusText;
+            this.selectedRepoPickId = "";
+            return;
+          }
+          if (data.path) this.newRepoPath = String(data.path);
+          await this.loadRepoPicker();
+          const match = this.repoPickerItems.find(
+            (x) => x.kind === "local" && x.path === this.newRepoPath
+          );
+          if (match) this.selectedRepoPickId = match.id;
+        } catch (e) {
+          this.error = String(e);
+          this.selectedRepoPickId = "";
+        } finally {
+          this.repoCloneBusy = false;
+        }
       }
     },
 
@@ -334,8 +417,10 @@ function dashboard() {
       this.mergeSession(data);
       this.selectSession(data.id);
       this.newRepoPath = "";
+      this.selectedRepoPickId = "";
       this.newSessionModel = "";
       await this.refreshSessions();
+      await this.loadRepoPicker();
       await this.$nextTick();
       this.syncModelSelects();
     },
@@ -416,6 +501,7 @@ function dashboard() {
       this.selectedStatus = "";
       this.messages = [];
       this.streamText = "";
+      await this.loadRepoPicker();
     },
 
     async sendAnswer(text) {

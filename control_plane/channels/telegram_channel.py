@@ -14,8 +14,10 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from control_plane.channels.base import BaseChannel
+from control_plane.github_cli import gh_repo_clone, gh_repo_list
 from control_plane.models import IncomingMessage, MessageTarget
 from control_plane.session_manager import SessionManager
+from control_plane.workspace_paths import list_top_level_workspaces
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,9 @@ class TelegramChannel(BaseChannel):
         self._task: asyncio.Task[None] | None = None
         # callback token -> (future, options, session_id) for cancel + first-answer wins across chats
         self._pending_question: dict[str, tuple[asyncio.Future[str], list[str], str]] = {}
+        # chat_id -> ordered list for inline keyboard callbacks (index -> value)
+        self._pending_github_repos: dict[str, list[str]] = {}
+        self._pending_workspace_paths: dict[str, list[str]] = {}
 
     @staticmethod
     def _question_cb_token(session_id: str, conversation_id: str) -> str:
@@ -52,19 +57,42 @@ class TelegramChannel(BaseChannel):
         async def cmd_start(message: Message) -> None:
             await message.answer(
                 "Cursor Control Plane.\n"
-                "/repo <path> — set workspace\n"
+                "/repo <path> — set workspace manually\n"
+                "/repos — GitHub repos (gh CLI); tap to clone & use\n"
+                "/workspaces — folders under your workspace root; tap to use\n"
                 "/sessions — list & connect to any session\n"
                 "Send text — continues the connected/active session.\n"
-                "/session close — stop current agent · /session new — start fresh"
+                "/session_close — stop the current agent"
             )
 
         @dp.message(Command("repos"))
         async def cmd_repos(message: Message) -> None:
-            lines = []
-            for r in sm.app_config.repos:
-                lines.append(f"• {r.name}: {r.path}")
-            text = "\n".join(lines) if lines else "No repos in config.yaml — add under repos:"
-            await message.answer(text)
+            assert message.chat
+            chat_id = str(message.chat.id)
+            rows, err = await gh_repo_list(limit=40)
+            if err:
+                await message.answer(f"Could not list GitHub repos ({err}). Is `gh` installed and logged in?")
+                return
+            if not rows:
+                await message.answer("No repos returned. Try `gh repo list` locally.")
+                return
+            owners: list[str] = []
+            lines: list[str] = []
+            buttons: list[list[InlineKeyboardButton]] = []
+            for i, r in enumerate(rows):
+                nwo = r.get("nameWithOwner") if isinstance(r, dict) else None
+                if not isinstance(nwo, str) or not nwo.strip():
+                    continue
+                nwo = nwo.strip()
+                owners.append(nwo)
+                lines.append(f"• {nwo}")
+                cb = f"gr:{i}"
+                if len(cb) <= 64:
+                    buttons.append([InlineKeyboardButton(text=nwo[:62], callback_data=cb)])
+            self._pending_github_repos[chat_id] = owners
+            text = "GitHub repos — tap to clone (if needed) and set workspace:\n" + "\n".join(lines)
+            kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+            await message.answer(text[:4000], reply_markup=kb)
 
         @dp.message(Command("repo"))
         async def cmd_repo(message: Message) -> None:
@@ -97,6 +125,36 @@ class TelegramChannel(BaseChannel):
                 lines.append(f"{marker}{s.id[:8]}… {s.activity} {ch}— {s.title[:45]}")
             await message.answer("\n".join(lines))
 
+        @dp.message(Command("workspaces"))
+        async def cmd_workspaces(message: Message) -> None:
+            assert message.chat
+            chat_id = str(message.chat.id)
+            root = sm.workspace_root_path()
+            entries = list_top_level_workspaces(root)
+            if not entries:
+                await message.answer(
+                    f"No workspace folders yet under:\n{root}\n\n"
+                    "Use /repos to clone a repo, or add folders there."
+                )
+                return
+            paths: list[str] = []
+            lines: list[str] = []
+            buttons: list[list[InlineKeyboardButton]] = []
+            for i, e in enumerate(entries[:40]):
+                name = e.get("name") or ""
+                path = e.get("path") or ""
+                if not path:
+                    continue
+                paths.append(path)
+                lines.append(f"• {name}")
+                cb = f"ws:{i}"
+                if len(cb) <= 64:
+                    buttons.append([InlineKeyboardButton(text=name[:62], callback_data=cb)])
+            self._pending_workspace_paths[chat_id] = paths
+            text = f"Workspaces under {root} — tap to use:\n" + "\n".join(lines)
+            kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+            await message.answer(text[:4000], reply_markup=kb)
+
         @dp.message(Command("sessions"))
         async def cmd_sessions(message: Message) -> None:
             assert message.chat
@@ -118,48 +176,78 @@ class TelegramChannel(BaseChannel):
             kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
             await message.answer("Sessions — tap to connect:\n" + "\n".join(lines), reply_markup=kb)
 
-        @dp.message(Command("session"))
-        async def cmd_session(message: Message) -> None:
-            assert message.text and message.chat
-            parts = message.text.split(maxsplit=1)
-            sub = (parts[1] if len(parts) > 1 else "").strip().lower()
+        @dp.message(Command("session_close"))
+        async def cmd_session_close(message: Message) -> None:
+            assert message.chat
             chat_id = str(message.chat.id)
+            active = sm.get_telegram_active_session(chat_id)
+            if active:
+                await sm.close_session(active)
+                sm.set_telegram_active_session(chat_id, None)
+                await message.answer("Connected session closed.")
+                return
             repo = sm.get_telegram_repo(chat_id)
-
-            if sub == "close":
-                active = sm.get_telegram_active_session(chat_id)
-                if active:
-                    await sm.close_session(active)
-                    sm.set_telegram_active_session(chat_id, None)
-                    await message.answer("Connected session closed.")
-                    return
-                if not repo:
-                    await message.answer("Set /repo first or use /sessions to connect.")
-                    return
-                repo_resolved = str(Path(repo).resolve())
-                row = await sm.db.find_open_agent_session("telegram", chat_id, repo_resolved)
-                if not row:
-                    await message.answer("No open session for this repo.")
-                    return
-                await sm.close_session(row["id"])
-                await message.answer("Session closed (agent process stopped).")
+            if not repo:
+                await message.answer("Set /repo or use /workspaces / /repos first, or use /sessions to connect.")
                 return
-
-            if sub == "new":
-                active = sm.get_telegram_active_session(chat_id)
-                if active:
-                    await sm.close_session(active)
-                    sm.set_telegram_active_session(chat_id, None)
-                if repo:
-                    repo_resolved = str(Path(repo).resolve())
-                    row = await sm.db.find_open_agent_session("telegram", chat_id, repo_resolved)
-                    if row:
-                        await sm.close_session(row["id"])
-                await message.answer("Previous session closed. Your next message starts a new session.")
+            repo_resolved = str(Path(repo).resolve())
+            row = await sm.db.find_open_agent_session("telegram", chat_id, repo_resolved)
+            if not row:
+                await message.answer("No open session for this workspace.")
                 return
+            await sm.close_session(row["id"])
+            await message.answer("Session closed (agent process stopped).")
 
-            # bare /session → redirect to /sessions
-            await cmd_sessions(message)
+        @dp.callback_query(F.data.startswith("gr:"))
+        async def on_github_repo_pick(cb: CallbackQuery) -> None:
+            data = cb.data or ""
+            if not cb.message:
+                await cb.answer()
+                return
+            chat_id = str(cb.message.chat.id)
+            try:
+                idx = int(data.split(":", 1)[1])
+            except (IndexError, ValueError):
+                await cb.answer()
+                return
+            lst = self._pending_github_repos.get(chat_id)
+            if not lst or not (0 <= idx < len(lst)):
+                await cb.answer("List expired — send /repos again.", show_alert=True)
+                return
+            nwo = lst[idx]
+            await cb.answer("Cloning…")
+            root = sm.workspace_root_path()
+            path, cerr = await gh_repo_clone(root, nwo)
+            if cerr or not path:
+                await cb.message.answer(f"Clone failed: {cerr or 'unknown error'}")
+                return
+            await sm.telegram_prepare_workspace(chat_id, str(path))
+            await cb.message.answer(
+                f"Workspace set to:\n{path}\nSend a message to start a new session."
+            )
+
+        @dp.callback_query(F.data.startswith("ws:"))
+        async def on_workspace_pick(cb: CallbackQuery) -> None:
+            data = cb.data or ""
+            if not cb.message:
+                await cb.answer()
+                return
+            chat_id = str(cb.message.chat.id)
+            try:
+                idx = int(data.split(":", 1)[1])
+            except (IndexError, ValueError):
+                await cb.answer()
+                return
+            lst = self._pending_workspace_paths.get(chat_id)
+            if not lst or not (0 <= idx < len(lst)):
+                await cb.answer("List expired — send /workspaces again.", show_alert=True)
+                return
+            path = lst[idx]
+            await cb.answer("OK")
+            await sm.telegram_prepare_workspace(chat_id, path)
+            await cb.message.answer(
+                f"Workspace set to:\n{path}\nSend a message to start a new session."
+            )
 
         @dp.callback_query(F.data.startswith("sess:"))
         async def on_session_connect(cb: CallbackQuery) -> None:
@@ -181,7 +269,7 @@ class TelegramChannel(BaseChannel):
             await cb.message.answer(
                 f"▶ Connected to session: {title}\n"
                 f"Status: {status} — your messages now go to this session.\n"
-                f"Use /session new to disconnect and start fresh."
+                f"Use /session_close or pick another workspace via /workspaces / /repos."
             )
 
         @dp.callback_query(F.data.startswith("q:"))
@@ -222,12 +310,13 @@ class TelegramChannel(BaseChannel):
 
         assert self._bot
         await self._bot.set_my_commands([
-            BotCommand(command="start",    description="Show help"),
-            BotCommand(command="sessions", description="List all sessions & connect"),
-            BotCommand(command="session",  description="session close | new"),
-            BotCommand(command="status",   description="Show open sessions"),
-            BotCommand(command="repos",    description="List configured repos"),
-            BotCommand(command="repo",     description="Set workspace path"),
+            BotCommand(command="start", description="Show help"),
+            BotCommand(command="sessions", description="List sessions & connect"),
+            BotCommand(command="session_close", description="Stop current agent"),
+            BotCommand(command="status", description="Show open sessions"),
+            BotCommand(command="repos", description="GitHub repos (gh)"),
+            BotCommand(command="workspaces", description="Local workspace folders"),
+            BotCommand(command="repo", description="Set workspace path"),
         ])
         self._task = asyncio.create_task(dp.start_polling(self._bot))
 

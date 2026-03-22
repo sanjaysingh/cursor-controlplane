@@ -12,13 +12,17 @@ from fastapi.responses import JSONResponse
 
 from control_plane.models import (
     AnswerQuestionRequest,
+    CloneGithubRepoRequest,
     CreateRunRequest,
     CreateSessionRequest,
     SendSessionMessageRequest,
 )
 from control_plane.acp_model_probe import probe_acp_model_options
 from control_plane.agent_models import list_cursor_models
+from control_plane.github_cli import gh_repo_clone, gh_repo_list
+from control_plane.repo_picker import build_repo_picker_items
 from control_plane.state import AppState
+from control_plane.workspace_paths import list_top_level_workspaces, resolve_workspace_root
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +44,48 @@ async def health() -> dict[str, str]:
 async def dashboard_config(request: Request) -> JSONResponse:
     """Web UI: fixed web identity (matches WEB_CHANNEL_KEY / default participant for streams)."""
     st: AppState = request.app.state.control_plane
-    return JSONResponse(content={"web_channel_key": _web_channel_key(st)})
+    root = resolve_workspace_root(st.config, st.env)
+    return JSONResponse(
+        content={
+            "web_channel_key": _web_channel_key(st),
+            "workspace_root": str(root),
+        }
+    )
+
+
+@router.get("/workspaces")
+async def list_workspaces(request: Request) -> JSONResponse:
+    st: AppState = request.app.state.control_plane
+    root = resolve_workspace_root(st.config, st.env)
+    return JSONResponse(content=list_top_level_workspaces(root))
+
+
+@router.get("/github/repos")
+async def github_repos(request: Request, limit: int = 40) -> JSONResponse:
+    rows, err = await gh_repo_list(limit=limit)
+    return JSONResponse(content={"repos": rows, "error": err or ""})
+
+
+@router.post("/github/clone")
+async def github_clone_route(request: Request, body: CloneGithubRepoRequest) -> JSONResponse:
+    st: AppState = request.app.state.control_plane
+    root = resolve_workspace_root(st.config, st.env)
+    path, err = await gh_repo_clone(root, body.name_with_owner.strip())
+    if err:
+        return JSONResponse(status_code=400, content={"error": err})
+    return JSONResponse(content={"path": str(path)})
+
+
+@router.get("/repo-picker")
+async def repo_picker(request: Request, gh_limit: int = 80) -> JSONResponse:
+    """Deduped local + GitHub entries for the New session repository dropdown."""
+    st: AppState = request.app.state.control_plane
+    if gh_limit < 1:
+        gh_limit = 1
+    if gh_limit > 100:
+        gh_limit = 100
+    items, gh_err = await build_repo_picker_items(st.config, st.env, gh_limit=gh_limit)
+    return JSONResponse(content={"items": items, "error": gh_err or ""})
 
 
 @router.get("/repos")

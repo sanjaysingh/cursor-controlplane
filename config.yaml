@@ -1,5 +1,8 @@
 repos: []
 
+# Optional absolute path for cloned repos / workspace folders. Default: ~/cursor-control-plane
+# workspace_root: ""
+
 channels:
   telegram:
     enabled: true

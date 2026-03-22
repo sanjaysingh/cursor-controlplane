@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,6 +45,10 @@ class AcpConfig(BaseModel):
 
 class AppConfig(BaseModel):
     repos: list[RepoEntry] = Field(default_factory=list)
+    workspace_root: str = Field(
+        default="",
+        description="Absolute or ~ path; empty uses default ~/cursor-control-plane at runtime.",
+    )
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     acp: AcpConfig = Field(default_factory=AcpConfig)
@@ -70,6 +74,11 @@ class EnvSettings(BaseSettings):
             "Fixed (channel, conversation_id) for the web dashboard until auth exists. "
             "Override via env WEB_CHANNEL_KEY for multi-profile on one server."
         ),
+    )
+    workspace_root: str = Field(
+        default="",
+        validation_alias=AliasChoices("workspace_root", "CONTROL_PLANE_WORKSPACE_ROOT"),
+        description="Override workspace root; default ~/cursor-control-plane when unset.",
     )
 
 

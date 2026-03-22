@@ -25,6 +25,21 @@ from control_plane.channels.registry import ChannelRegistry
 
 logger = logging.getLogger(__name__)
 
+# Cursor ACP `cursor/*` methods that are sync/notification, not real user questions.
+_CURSOR_AUTO_ACK_METHODS = frozenset({"cursor/update_todos"})
+
+
+def _cursor_auto_ack_result(msg: dict[str, Any]) -> dict[str, Any]:
+    """JSON-RPC result for auto-acknowledged cursor/* calls (matches _on_question reply shape)."""
+    params = msg.get("params") or {}
+    options = params.get("options") or params.get("choices") or []
+    if isinstance(options, list) and options and all(isinstance(o, dict) and "id" in o for o in options):
+        oid = options[0].get("id")
+        if oid is not None:
+            return {"responses": [{"optionId": oid}]}
+    return {"responses": [{"optionId": "OK"}]}
+
+
 # Keys that appear on session/prompt RPC result when the model finished a turn without
 # carrying the visible reply (the reply is streamed via session/update instead).
 _PROMPT_RESULT_META_KEYS = frozenset(
@@ -191,6 +206,37 @@ class SessionManager:
     def get_telegram_active_session(self, chat_id: str) -> str | None:
         return self._telegram_active_session.get(str(chat_id))
 
+    def workspace_root_path(self) -> Path:
+        from control_plane.workspace_paths import resolve_workspace_root
+
+        return resolve_workspace_root(self.app_config, self.env)
+
+    async def telegram_prepare_workspace(self, chat_id: str, repo_path: str) -> None:
+        """
+        After selecting a workspace/repo on Telegram: close pinned and open sessions,
+        then set the chat's workspace path so the next message starts a new session.
+        """
+        cid = str(chat_id)
+        new_resolved = str(Path(repo_path).resolve())
+        active = self.get_telegram_active_session(cid)
+        if active:
+            await self.close_session(active)
+            self.set_telegram_active_session(cid, None)
+        old = self.get_telegram_repo(cid)
+        if old:
+            try:
+                old_resolved = str(Path(old).resolve())
+            except OSError:
+                old_resolved = old
+            if old_resolved != new_resolved:
+                row = await self.db.find_open_agent_session("telegram", cid, old_resolved)
+                if row:
+                    await self.close_session(row["id"])
+        row = await self.db.find_open_agent_session("telegram", cid, new_resolved)
+        if row:
+            await self.close_session(row["id"])
+        self.set_telegram_repo(cid, new_resolved)
+
     def _repo_name_for_path(self, path: str) -> str:
         for r in self.app_config.repos:
             if Path(r.path).resolve() == Path(path).resolve():
@@ -263,6 +309,18 @@ class SessionManager:
         ev = {"type": "session_closed" if closed else "session_updated", "session": self._to_public(ms).to_public_dict()}
         await self.hub.publish(ev)
 
+    @staticmethod
+    def _session_title_from_repo_path(repo_path: str, explicit_title: str = "") -> str:
+        """Default chat title = workspace folder basename; optional explicit title from API."""
+        t = explicit_title.strip()
+        if t:
+            return t
+        try:
+            base = Path(repo_path).name
+            return base if base else "Session"
+        except OSError:
+            return "Session"
+
     async def create_session(
         self,
         channel: str,
@@ -274,7 +332,8 @@ class SessionManager:
         repo_path = str(Path(repo_path).resolve())
         sid = str(uuid.uuid4())
         m = _normalize_session_model(model)
-        await self.db.insert_agent_session(sid, channel, channel_key, repo_path, title or "New chat", model=m)
+        effective_title = self._session_title_from_repo_path(repo_path, title)
+        await self.db.insert_agent_session(sid, channel, channel_key, repo_path, effective_title, model=m)
         # insert_agent_session also ensures creator as session_participants row
         ms = await self.ensure_managed(sid)
         await self._emit_session(ms)
@@ -504,11 +563,6 @@ class SessionManager:
                 ms.error_message = None
 
             await self._ensure_acp(ms)
-
-            if (not ms.title or ms.title == "New chat") and text.strip():
-                snippet = text.strip()[:80] + ("…" if len(text.strip()) > 80 else "")
-                await self.db.update_agent_session_title(session_id, snippet)
-                ms.title = snippet
 
             await self.db.append_session_message(session_id, "user", text)
             ms.activity = AgentActivity.running
@@ -765,6 +819,11 @@ class SessionManager:
         _req_id: str,
         msg: dict[str, Any],
     ) -> dict[str, Any]:
+        method = msg.get("method")
+        if isinstance(method, str) and method in _CURSOR_AUTO_ACK_METHODS:
+            logger.debug("ACP auto-ack %s (no user prompt)", method)
+            return _cursor_auto_ack_result(msg)
+
         params = msg.get("params") or {}
         question = str(params.get("question") or params.get("title") or msg.get("method") or "Confirm?")
         options = params.get("options") or params.get("choices") or []

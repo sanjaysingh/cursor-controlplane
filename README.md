@@ -8,6 +8,7 @@ Personal control plane that routes instructions from **Telegram** (and a **stati
 - [Cursor CLI](https://cursor.com/docs/cli) installed — see **Windows note** below
 - `CURSOR_API_KEY` or completed `agent login` on the same machine
 - (Optional) Telegram bot token from [@BotFather](https://t.me/BotFather)
+- (Optional) [GitHub CLI](https://cli.github.com/) (`gh`) for **`/repos`** / **`GET /api/github/repos`** — run `gh auth login` on the server host
 
 ## Setup
 
@@ -21,7 +22,7 @@ copy .env.example .env   # set CURSOR_API_KEY, TELEGRAM_BOT_TOKEN
 
 Edit `config.yaml`:
 
-- Add one or more `repos` entries (name + path), or rely on Telegram `/repo` / web UI repo path.
+- Add one or more `repos` entries (name + path), or rely on Telegram `/repo`, **`/workspaces`**, **`/repos`**, or the web sidebar. Optional **`workspace_root`** (default **`~/cursor-control-plane`**) or env **`CONTROL_PLANE_WORKSPACE_ROOT`**.
 - Toggle `channels.telegram.enabled` / `channels.web.enabled`.
 - Optional: `acp.default_model` (global `agent --model`), `acp.stream_update_mode` (`agent_message_chunk_only` vs `all` — see [ACP docs](https://cursor.com/docs/cli/acp)).
 
@@ -33,6 +34,7 @@ python run.py
 
 - Dashboard: `http://localhost:8080/` (adjust port in `config.yaml`; static assets are under `/assets/` so WebSocket `/ws` is not blocked). The UI uses **Tailwind CSS**, **Alpine.js**, **marked**, and **DOMPurify** (CDN) so chat messages render **Markdown** safely—no frontend build step.
 - **Sessions API**: `GET/POST /api/sessions` (optional `model` on create only), `GET /api/sessions/{id}/messages`, `POST /api/sessions/{id}/message`, `POST /api/sessions/{id}/close`, `POST /api/sessions/{id}/answer`, **`WebSocket /ws`**
+- **`GET /api/repo-picker`**: deduped **local** + **GitHub** entries for the New session dropdown · **`GET /api/workspaces`**, **`GET /api/github/repos`**, **`POST /api/github/clone`** (still available for integrations) · **`GET /api/dashboard-config`**: `web_channel_key` + **`workspace_root`**
 - **`GET /api/models`**: exact ids from `agent models` / `--list-models` — **dashboard dropdown** uses these strings as both label and value (same as `agent --model <id>`). First row **Auto** = omit `--model`.
 - **`GET /api/models/acp?workspace=<dir>`**: optional ACP probe (diagnostics / advanced use); the web UI does not use it for the picker.
 - **Legacy aliases** (same UUID as session id): `GET/POST /api/runs`, `POST /api/runs/{id}/stop`, `POST /api/runs/{id}/answer`
@@ -46,6 +48,7 @@ python run.py
 ## How sessions work
 
 - **Workspace is per session**: each session stores a `repo_path`; the agent runs with that cwd until the session is closed.
+- **Chat title**: defaults to the **workspace folder name** (last segment of `repo_path`). Pass `title` on **`POST /api/sessions`** to override.
 - **One ACP process per open session**: follow-up messages use `session_prompt` on the same client — not a new subprocess per message.
 - **Model**: set **only when creating** a session — exact `agent --model` id, or **Auto** (omit `--model`). It cannot be changed after creation. If unset at creation, `CURSOR_AGENT_MODEL` / `acp.default_model` can still apply when spawning (see `session_manager._effective_model`).
 - **Close** ends the CLI for that session only. **Closed sessions** stay in the list; sending a message **reopens** them and tries **`session_load`** with the saved ACP session id.
@@ -54,14 +57,14 @@ python run.py
 
 1. Start the server with `TELEGRAM_BOT_TOKEN` set.
 2. Open your bot, send `/start`.
-3. `/repos` — list configured repos; `/repo C:\path\to\repo` — set workspace for this chat.
+3. **`/repos`** — GitHub repos (`gh`) · **`/workspaces`** — local folders under the workspace root · **`/repo`** — set path manually.
 4. Plain messages continue the **open session** for that repo (same agent process until you close it).
-5. `/session` — list sessions · `/session close` — stop agent for current thread · `/session new` — next message starts a **new** session for that repo.
+5. **`/sessions`** — list and connect · **`/session_close`** — stop the agent for this chat · Choosing a repo or workspace sets the folder and starts a **new** session on your **next** message.
 
 ## Web usage
 
 1. Open the dashboard; your browser gets a stable **client id** (localStorage) so sessions are scoped to you.
-2. **Sidebar**: list sessions (open and closed). **New chat** picks a repo, optional **model**, and creates a session.
+2. **Sidebar**: **New session** first (repository **dropdown** via `GET /api/repo-picker`, optional **model**), then **Sessions** history below.
 3. **Select any session** to load history and **resume**; the session header shows the model chosen at creation (read-only).
 4. Type in the chat box to send.
 5. **Close session** stops the agent subprocess for that session. You can still select it later and send to reopen.

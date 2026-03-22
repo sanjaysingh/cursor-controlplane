@@ -48,7 +48,7 @@
   >
     <!-- Sidebar -->
     <aside
-      class="flex max-h-[min(48vh,400px)] w-full shrink-0 flex-col overflow-hidden border-b border-surface-700/80 bg-surface-900/80 shadow-panel backdrop-blur-xl md:h-full md:max-h-full md:max-w-[22rem] md:border-b-0 md:border-r"
+      class="flex max-h-[min(85vh,720px)] w-full min-h-0 shrink-0 flex-col overflow-hidden border-b border-surface-700/80 bg-surface-900/80 shadow-panel backdrop-blur-xl md:h-full md:max-h-full md:max-w-[22rem] md:border-b-0 md:border-r"
     >
       <div class="border-b border-surface-700/60 p-5">
         <div class="flex items-center gap-3">
@@ -64,32 +64,50 @@
         </div>
       </div>
 
-      <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
-        <div class="rounded-xl border border-surface-700/60 bg-surface-850/50 p-4 shadow-inner">
-          <h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">New session</h2>
+      <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overflow-x-hidden overscroll-contain p-4">
+        <div class="shrink-0 rounded-xl border border-surface-700/60 bg-surface-850/50 p-4 shadow-inner">
+          <h2 class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">New session</h2>
+          <p class="mb-3 break-all font-mono text-[10px] leading-snug text-slate-500">
+            <span class="text-slate-600">Workspace root</span>
+            <span class="block text-slate-400" x-text="workspaceRoot || '—'"></span>
+          </p>
           <label class="block">
-            <span class="mb-1.5 block text-xs font-medium text-slate-400">Repository path</span>
-            <input
-              type="text"
-              x-model="newRepoPath"
-              placeholder="C:\dev\my-repo"
-              class="input-field w-full font-mono text-xs"
-            />
+            <span class="mb-1.5 block text-xs font-medium text-slate-400">Repository</span>
+            <div class="relative">
+              <span
+                x-show="repoPickerLoading || repoCloneBusy"
+                class="pointer-events-none absolute right-2 top-1/2 z-10 -translate-y-1/2 text-[10px] text-slate-500"
+                x-cloak
+                x-text="repoCloneBusy ? 'Cloning…' : 'Loading…'"
+              ></span>
+              <select
+                x-ref="repoPickerSelect"
+                x-model="selectedRepoPickId"
+                @change="onRepoPickerChange()"
+                class="input-field input-select w-full cursor-pointer appearance-none font-mono text-xs pr-8"
+                :class="{ 'opacity-60': repoPickerLoading || repoCloneBusy }"
+                :disabled="repoPickerLoading"
+              >
+                <option value="">Choose repository…</option>
+                <template x-for="it in repoPickerItems" :key="it.id">
+                  <option :value="it.id" x-text="it.label"></option>
+                </template>
+              </select>
+            </div>
           </label>
+          <p
+            x-show="repoPickerError"
+            class="mt-1 text-[10px] leading-snug text-amber-400/90"
+            x-text="repoPickerError"
+          ></p>
+          <p class="mt-1 text-[10px] leading-snug text-slate-500">
+            <span class="text-slate-600">Path:</span>
+            <span class="break-all font-mono text-slate-400" x-text="newRepoPath || '—'"></span>
+          </p>
           <div class="mt-3">
             <div class="mb-1.5 flex items-center justify-between gap-2">
               <span class="text-xs font-medium text-slate-400">Model <span class="font-normal text-slate-500">(optional)</span></span>
-              <div class="flex items-center gap-2">
-                <span x-show="modelsLoading" class="text-[10px] text-slate-500" x-cloak>Loading…</span>
-                <button
-                  type="button"
-                  @click="fetchModels()"
-                  class="rounded-md border border-surface-600/80 bg-surface-800 px-2 py-1 text-[10px] font-medium text-slate-400 transition hover:border-slate-500 hover:text-slate-200"
-                  title="Reload from `agent models` (same ids as `agent --model`)"
-                >
-                  Refresh list
-                </button>
-              </div>
+              <span x-show="modelsLoading" class="text-[10px] text-slate-500" x-cloak>Loading…</span>
             </div>
             <select
               x-ref="newSessionModelSelect"
@@ -111,14 +129,15 @@
           <button
             type="button"
             @click="createSession()"
-            :disabled="!newRepoPath"
+            :disabled="!newRepoPath || repoPickerLoading || repoCloneBusy"
             class="btn-primary mt-4 w-full disabled:cursor-not-allowed disabled:opacity-40"
           >
             Create session
           </button>
         </div>
 
-        <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <!-- Sessions history: flex-1 so list fills space below New session -->
+        <div class="flex min-h-[200px] flex-1 flex-col overflow-hidden md:min-h-0">
           <div class="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 px-1">
             <div class="flex min-w-0 flex-1 items-center gap-2">
               <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-500">Sessions</h2>
@@ -136,21 +155,21 @@
               <button
                 type="button"
                 @click="closeAllSessions()"
-                x-show="sessions.some(s => s.status === 'open')"
+                x-show="hasOpenSessions"
                 class="rounded px-1.5 py-0.5 text-[10px] font-medium text-slate-500 transition hover:bg-surface-700/60 hover:text-amber-300"
                 title="Close all open sessions"
               >Close all</button>
               <button
                 type="button"
                 @click="purgeAllSessions()"
-                x-show="sessions.length > 0"
+                x-show="hasAnySessions"
                 class="rounded px-1.5 py-0.5 text-[10px] font-medium text-slate-500 transition hover:bg-surface-700/60 hover:text-red-400"
                 title="Permanently delete all sessions and messages"
               >Purge all</button>
             </div>
           </div>
           <div class="session-scroll min-h-0 flex-1 overflow-y-auto pr-1">
-            <template x-if="sessions.length === 0">
+            <template x-if="!sessions || sessions.length === 0">
               <p class="rounded-lg border border-dashed border-surface-700/80 bg-surface-850/30 px-3 py-8 text-center text-xs text-slate-500">
                 No sessions yet. Create one above.
               </p>

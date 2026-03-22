@@ -20,6 +20,7 @@ from control_plane.channels.web_channel import WebChannel
 from control_plane.channels.telegram_channel import TelegramChannel
 from control_plane.session_manager import SessionManager
 from control_plane.state import AppState
+from control_plane.workspace_paths import resolve_workspace_root
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,10 @@ async def lifespan(app: FastAPI):
     await st.db.init_schema()
     for r in st.config.repos:
         await st.db.upsert_repo(r.name, r.path, r.description)
+
+    wr = resolve_workspace_root(st.config, st.env)
+    wr.mkdir(parents=True, exist_ok=True)
+    logger.info("Workspace root: %s", wr)
 
     await st.registry.get("web").start()
     tg = st.registry.all().get("telegram")

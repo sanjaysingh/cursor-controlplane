@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 def utcnow() -> datetime:
@@ -62,6 +62,23 @@ class IncomingMessage(BaseModel):
     channel: str
     text: str
     repo_path: str | None = None
+
+
+class CloneGithubRepoRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name_with_owner: str = Field(
+        ...,
+        validation_alias=AliasChoices("name_with_owner", "nameWithOwner"),
+    )
+
+    @model_validator(mode="after")
+    def _strip_nwo(self) -> CloneGithubRepoRequest:
+        s = self.name_with_owner.strip()
+        if not s:
+            raise ValueError("nameWithOwner is required")
+        self.name_with_owner = s
+        return self
 
 
 class CreateSessionRequest(BaseModel):
