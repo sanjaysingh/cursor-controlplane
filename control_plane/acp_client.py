@@ -288,7 +288,7 @@ class AcpClient:
                     "fs": {"readTextFile": False, "writeTextFile": False},
                     "terminal": False,
                 },
-                "clientInfo": {"name": "cursor-cli-control-plane", "version": "0.3.0"},
+                "clientInfo": {"name": "cursor-cli-control-plane", "version": "0.3.1"},
             },
         )
 

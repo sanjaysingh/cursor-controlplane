@@ -9,6 +9,7 @@ import sys
 
 import uvicorn
 
+from control_plane.app import create_app
 from control_plane.config import get_settings
 from control_plane.db import Database
 from control_plane.paths import database_path
@@ -113,7 +114,7 @@ def main() -> None:
     asyncio.run(_maybe_first_run_wizard())
     app_config, _env = get_settings()
     uvicorn.run(
-        "control_plane.app:create_app",
+        create_app,
         factory=True,
         host=app_config.server.host,
         port=app_config.server.port,
