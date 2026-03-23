@@ -10,9 +10,19 @@ from pathlib import Path
 from typing import Any
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeChat,
+    BotCommandScopeDefault,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    TelegramObject,
+)
 
 from control_plane.agent_models import list_cursor_models
 from control_plane.channels.base import BaseChannel
@@ -25,12 +35,45 @@ from control_plane.workspace_paths import list_top_level_workspaces
 logger = logging.getLogger(__name__)
 
 
+class TelegramAllowlistMiddleware(BaseMiddleware):
+    """Restrict bot commands and callbacks to configured Telegram user IDs."""
+
+    def __init__(self, allowed_user_ids: frozenset[int]) -> None:
+        self._allowed = allowed_user_ids
+
+    async def __call__(
+        self,
+        handler: Any,
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        user = getattr(event, "from_user", None)
+        if user is None or user.id not in self._allowed:
+            logger.warning(
+                "Telegram allowlist denied: user_id=%s username=%s event=%s",
+                getattr(user, "id", None),
+                getattr(user, "username", None),
+                type(event).__name__,
+            )
+            # Silent for messages (no reply). Callbacks must be answered to clear the client UI.
+            if isinstance(event, CallbackQuery):
+                await event.answer()
+            return None
+        return await handler(event, data)
+
+
 class TelegramChannel(BaseChannel):
     name = "telegram"
 
-    def __init__(self, token: str, session_manager: SessionManager) -> None:
+    def __init__(
+        self,
+        token: str,
+        session_manager: SessionManager,
+        allowed_user_ids: frozenset[int],
+    ) -> None:
         self._token = token
         self._sm = session_manager
+        self._allowed_user_ids = allowed_user_ids
         self._bot: Bot | None = None
         self._dp: Dispatcher | None = None
         self._task: asyncio.Task[None] | None = None
@@ -52,11 +95,50 @@ class TelegramChannel(BaseChannel):
         model = f" [{s.model}]" if s.model else ""
         return f"{status} {title or s.id[:8]}{model}"
 
+    def _bot_command_list(self) -> list[BotCommand]:
+        return [
+            BotCommand(command="start", description="Show help"),
+            BotCommand(command="sessions", description="List sessions & connect"),
+            BotCommand(command="session_new", description="New session at workspace root"),
+            BotCommand(command="models", description="List models & set default"),
+            BotCommand(command="session_close", description="Stop current agent"),
+            BotCommand(command="status", description="Show open sessions"),
+            BotCommand(command="repos", description="GitHub repos (gh)"),
+            BotCommand(command="workspaces", description="Local workspace folders"),
+        ]
+
+    async def _sync_bot_commands(self) -> None:
+        """Hide slash commands from strangers: clear default scope, set per allowed user only."""
+        if not self._bot:
+            return
+        cmds = self._bot_command_list()
+        try:
+            await self._bot.delete_my_commands(scope=BotCommandScopeDefault())
+        except TelegramBadRequest as e:
+            logger.warning("Could not clear default Telegram command list: %s", e)
+        for uid in sorted(self._allowed_user_ids):
+            try:
+                await self._bot.set_my_commands(
+                    cmds,
+                    scope=BotCommandScopeChat(chat_id=uid),
+                )
+            except TelegramBadRequest as e:
+                logger.warning(
+                    "Could not set Telegram commands for allowed user %s "
+                    "(may need to start the bot first in Telegram): %s",
+                    uid,
+                    e,
+                )
+
     async def start(self) -> None:
         self._bot = Bot(self._token)
         self._dp = Dispatcher()
         dp = self._dp
         sm = self._sm
+
+        allow = TelegramAllowlistMiddleware(self._allowed_user_ids)
+        dp.message.middleware(allow)
+        dp.callback_query.middleware(allow)
 
         @dp.message(CommandStart())
         async def cmd_start(message: Message) -> None:
@@ -385,16 +467,7 @@ class TelegramChannel(BaseChannel):
             )
 
         assert self._bot
-        await self._bot.set_my_commands([
-            BotCommand(command="start", description="Show help"),
-            BotCommand(command="sessions", description="List sessions & connect"),
-            BotCommand(command="session_new", description="New session at workspace root"),
-            BotCommand(command="models", description="List models & set default"),
-            BotCommand(command="session_close", description="Stop current agent"),
-            BotCommand(command="status", description="Show open sessions"),
-            BotCommand(command="repos", description="GitHub repos (gh)"),
-            BotCommand(command="workspaces", description="Local workspace folders"),
-        ])
+        await self._sync_bot_commands()
         self._task = asyncio.create_task(dp.start_polling(self._bot))
 
     async def stop(self) -> None:

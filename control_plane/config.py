@@ -2,13 +2,32 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from pydantic import AliasChoices, BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+
+def parse_telegram_allowed_user_ids(raw: str) -> frozenset[int]:
+    """Parse TELEGRAM_ALLOWED_USER_IDS: comma- or whitespace-separated integers."""
+    if not (raw or "").strip():
+        return frozenset()
+    out: set[int] = set()
+    for part in re.split(r"[\s,]+", raw.strip()):
+        if not part:
+            continue
+        try:
+            out.add(int(part))
+        except ValueError:
+            logger.warning("Ignoring invalid Telegram user id in TELEGRAM_ALLOWED_USER_IDS: %r", part)
+    return frozenset(out)
 
 
 class RepoEntry(BaseModel):
@@ -63,6 +82,10 @@ class EnvSettings(BaseSettings):
 
     cursor_api_key: str = ""
     telegram_bot_token: str = ""
+    telegram_allowed_user_ids: str = Field(
+        default="",
+        description="Comma-separated Telegram user IDs allowed to use the bot (required for access).",
+    )
     cursor_agent_model: str = Field(
         default="",
         description="Optional default model (overrides acp.default_model; session.model still wins).",

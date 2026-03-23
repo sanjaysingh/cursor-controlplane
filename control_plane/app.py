@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from control_plane.api.routes import router as api_router, websocket_endpoint
-from control_plane.config import get_settings
+from control_plane.config import get_settings, parse_telegram_allowed_user_ids
 from control_plane.db import Database
 from control_plane.events import EventHub
 from control_plane.channels.registry import ChannelRegistry
@@ -73,7 +73,13 @@ def create_app() -> FastAPI:
     web = WebChannel(hub)
     registry.register(web)
     if app_config.channels.telegram.get("enabled") and env.telegram_bot_token:
-        registry.register(TelegramChannel(env.telegram_bot_token, session_manager))
+        allowed_ids = parse_telegram_allowed_user_ids(env.telegram_allowed_user_ids)
+        if not allowed_ids:
+            logger.info(
+                "Telegram is enabled but TELEGRAM_ALLOWED_USER_IDS is empty — "
+                "no slash-command menu and every update will be ignored until you set at least one user id."
+            )
+        registry.register(TelegramChannel(env.telegram_bot_token, session_manager, allowed_ids))
 
     static_dir = Path(__file__).resolve().parent / "static"
 
