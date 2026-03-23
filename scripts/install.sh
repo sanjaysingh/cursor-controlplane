@@ -2,15 +2,13 @@
 # Install latest cursor-controlplane binary from GitHub Releases.
 #
 # Usage:
-#   export CONTROL_PLANE_REPO="your-org/cursor-controlplane"   # required once
-#   curl -fsSL https://raw.githubusercontent.com/your-org/cursor-controlplane/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/sanjaysingh/cursor-controlplane/main/scripts/install.sh | bash
 #   curl -fsSL ... | bash -s -- --with-service
 #
 # Options:
 #   --with-service, --service   Register a user service (systemd on Linux, LaunchAgent on macOS)
 #   CONTROL_PLANE_INSTALL_SERVICE=1   Same as --with-service
-#
-# Or download this script, set CONTROL_PLANE_REPO, and run: bash install.sh [--with-service]
+#   CONTROL_PLANE_REPO                Override the GitHub org/repo (default: sanjaysingh/cursor-controlplane)
 
 set -euo pipefail
 
@@ -23,7 +21,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       echo "Usage: install.sh [--with-service|--service]" >&2
-      echo "Env: CONTROL_PLANE_REPO (required), CONTROL_PLANE_INSTALL_SERVICE=1" >&2
+      echo "Env: CONTROL_PLANE_REPO (default: sanjaysingh/cursor-controlplane), CONTROL_PLANE_INSTALL_SERVICE=1" >&2
       exit 0
       ;;
     *)
@@ -37,11 +35,7 @@ if [[ "${CONTROL_PLANE_INSTALL_SERVICE:-}" == "1" ]]; then
   WITH_SERVICE=true
 fi
 
-REPO="${CONTROL_PLANE_REPO:-YOUR_ORG/cursor-controlplane}"
-if [[ "$REPO" == YOUR_ORG/* ]]; then
-  echo "Set CONTROL_PLANE_REPO to your GitHub org/repo (e.g. export CONTROL_PLANE_REPO=myorg/cursor-controlplane)" >&2
-  exit 1
-fi
+REPO="${CONTROL_PLANE_REPO:-sanjaysingh/cursor-controlplane}"
 
 uname_s="$(uname -s)"
 uname_m="$(uname -m)"

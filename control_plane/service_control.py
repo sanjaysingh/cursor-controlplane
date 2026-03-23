@@ -31,8 +31,7 @@ def restart_service() -> int:
             "No service install metadata found.\n"
             f"Expected: {service_marker_path()}\n"
             "Install with: bash install.sh --with-service  "
-            "or  install.ps1 -WithService  "
-            "(and set CONTROL_PLANE_REPO).",
+            "or  install.ps1 -WithService",
             file=sys.stderr,
         )
         return 1

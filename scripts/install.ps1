@@ -1,14 +1,15 @@
 # Install latest cursor-controlplane.exe from GitHub Releases (Windows).
 #
 # Usage (run in PowerShell):
-#   $env:CONTROL_PLANE_REPO = "your-org/cursor-controlplane"
-#   irm https://raw.githubusercontent.com/your-org/cursor-controlplane/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/sanjaysingh/cursor-controlplane/main/scripts/install.ps1 | iex
 #
 # With background service (Scheduled Task at logon):
 #   $env:CONTROL_PLANE_INSTALL_SERVICE = "1"
 #   irm ... | iex
 # Or download the script and run:
 #   .\install.ps1 -WithService
+#
+# Override repo: $env:CONTROL_PLANE_REPO = "myorg/cursor-controlplane"
 
 param(
     [switch]$WithService
@@ -20,10 +21,7 @@ if ($env:CONTROL_PLANE_INSTALL_SERVICE -eq "1") {
     $WithService = $true
 }
 
-$repo = $env:CONTROL_PLANE_REPO
-if (-not $repo) {
-    throw "Set CONTROL_PLANE_REPO to your GitHub org/repo, e.g. `$env:CONTROL_PLANE_REPO = 'myorg/cursor-controlplane'"
-}
+$repo = if ($env:CONTROL_PLANE_REPO) { $env:CONTROL_PLANE_REPO } else { "sanjaysingh/cursor-controlplane" }
 
 $asset = "cursor-controlplane-windows-amd64.exe"
 $url = "https://github.com/$repo/releases/latest/download/$asset"
