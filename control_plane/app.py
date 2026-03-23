@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket
@@ -23,6 +24,22 @@ from control_plane.state import AppState
 from control_plane.workspace_paths import resolve_workspace_root
 
 logger = logging.getLogger(__name__)
+
+_LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
+
+
+def _attach_log_file(path: Path) -> None:
+    """Append a UTF-8 file handler to the root logger (keeps existing console/uvicorn handlers)."""
+    path = path.expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    resolved = str(path.resolve())
+    root = logging.getLogger()
+    for h in root.handlers:
+        if isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", None) == resolved:
+            return
+    fh = logging.FileHandler(path, encoding="utf-8")
+    fh.setFormatter(logging.Formatter(_LOG_FORMAT))
+    root.addHandler(fh)
 
 
 @asynccontextmanager
@@ -56,8 +73,10 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     app_config, env = get_settings()
+    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+    if (env.log_file or "").strip():
+        _attach_log_file(Path(env.log_file.strip()))
     hub = EventHub()
     registry = ChannelRegistry()
     db = Database(database_path())

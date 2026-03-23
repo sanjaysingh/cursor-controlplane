@@ -12,6 +12,7 @@ from control_plane.config import (
     SETTING_CURSOR_API_KEY,
     SETTING_SERVER_HOST,
     SETTING_SERVER_PORT,
+    SETTING_SETUP_WIZARD_COMPLETED,
     SETTING_TELEGRAM_ALLOWED_USER_IDS,
     SETTING_TELEGRAM_BOT_TOKEN,
     SETTING_TELEGRAM_ENABLED,
@@ -42,18 +43,26 @@ def _maybe_tip_restart() -> None:
         )
 
 
+def _truthy_setting(raw: str | None) -> bool:
+    if raw is None or not (raw := raw.strip()):
+        return False
+    return raw.lower() in ("true", "1", "yes", "on")
+
+
 def needs_interactive_setup(db_path: Path | None = None) -> bool:
-    """True when Telegram is enabled, no token in env/DB, and stdin is a TTY."""
+    """True when Telegram is enabled, setup not finished, no token from .env/DB, and stdin is a TTY."""
     if not sys.stdin.isatty():
         return False
     yaml_cfg = load_yaml_config()
     if not yaml_cfg.channels.telegram.get("enabled", True):
         return False
-    if os.environ.get("TELEGRAM_BOT_TOKEN", "").strip():
-        return False
     path = db_path or database_path()
     overrides = load_db_overrides(path)
-    if (overrides.get(SETTING_TELEGRAM_BOT_TOKEN) or "").strip():
+    if _truthy_setting(overrides.get(SETTING_SETUP_WIZARD_COMPLETED)):
+        return False
+    # Use merged settings so .env (pydantic env_file) and DB overrides match runtime.
+    _, env = get_settings()
+    if (env.telegram_bot_token or "").strip():
         return False
     return True
 
@@ -123,6 +132,8 @@ async def run_setup_wizard(db: Database, *, force: bool = False) -> None:
     model = _prompt("Default ACP model id (empty = auto / omit flag)", "")
     if model.strip():
         await db.set_setting(SETTING_ACP_DEFAULT_MODEL, model.strip())
+
+    await db.set_setting(SETTING_SETUP_WIZARD_COMPLETED, "true")
 
     print(
         "\nSetup saved to the local database. Start the server with "

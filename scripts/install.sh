@@ -92,6 +92,7 @@ After=network-online.target
 
 [Service]
 Type=simple
+Environment=CONTROL_PLANE_LOG_FILE=${DATA_DIR}/controlplane.log
 ExecStart=${BIN} serve
 Restart=on-failure
 RestartSec=5
@@ -102,7 +103,7 @@ EOF
   systemctl --user daemon-reload
   systemctl --user enable --now cursor-controlplane.service
   printf '%s\n' '{"type":"systemd-user","unit":"cursor-controlplane.service"}' >"${DATA_DIR}/service.json"
-  echo "Installed systemd user service: cursor-controlplane.service (log: journalctl --user -u cursor-controlplane.service -f)" >&2
+  echo "Installed systemd user service: cursor-controlplane.service (logs: journalctl --user -u cursor-controlplane.service -f, and ${DATA_DIR}/controlplane.log)" >&2
 }
 
 install_macos_service() {
@@ -120,6 +121,11 @@ install_macos_service() {
     <string>${BIN}</string>
     <string>serve</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CONTROL_PLANE_LOG_FILE</key>
+    <string>${DATA_DIR}/controlplane.log</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -135,7 +141,7 @@ PLIST
     launchctl load "$plist"
   fi
   printf '%s\n' '{"type":"launchd","label":"com.cursor.controlplane"}' >"${DATA_DIR}/service.json"
-  echo "Installed LaunchAgent: $plist (restart: cursor-controlplane restart)" >&2
+  echo "Installed LaunchAgent: $plist (log file: ${DATA_DIR}/controlplane.log; restart: cursor-controlplane restart)" >&2
 }
 
 if [[ "$WITH_SERVICE" == true ]]; then

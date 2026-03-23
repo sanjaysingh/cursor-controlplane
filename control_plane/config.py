@@ -25,6 +25,7 @@ SETTING_SERVER_PORT = "server_port"
 SETTING_ACP_COMMAND = "acp_command"
 SETTING_ACP_DEFAULT_MODEL = "acp_default_model"
 SETTING_CURSOR_API_KEY = "cursor_api_key"
+SETTING_SETUP_WIZARD_COMPLETED = "setup_wizard_completed"
 def load_db_overrides(db_path: Path) -> dict[str, str]:
     """Read all app_settings rows synchronously (used before async app startup)."""
     if not db_path.is_file():
@@ -121,6 +122,11 @@ class EnvSettings(BaseSettings):
         default="",
         validation_alias=AliasChoices("workspace_root", "CONTROL_PLANE_WORKSPACE_ROOT"),
         description="Override workspace root; default ~/cursor-control-plane when unset.",
+    )
+    log_file: str = Field(
+        default="",
+        validation_alias=AliasChoices("log_file", "CONTROL_PLANE_LOG_FILE"),
+        description="Append app + uvicorn logs to this path (UTF-8). Empty = console only from defaults.",
     )
 
 

@@ -43,9 +43,11 @@ irm https://raw.githubusercontent.com/sanjaysingh/cursor-controlplane/main/scrip
 ```
 
 Services created:
-- **Linux:** systemd user unit `cursor-controlplane.service` — check with `systemctl --user status cursor-controlplane`. On headless servers run `loginctl enable-linger $USER` so the service starts without an interactive login.
-- **macOS:** LaunchAgent `com.cursor.controlplane` in `~/Library/LaunchAgents/`.
-- **Windows:** Scheduled Task `CursorControlPlane` (runs at log on).
+- **Linux:** systemd user unit `cursor-controlplane.service` — check with `systemctl --user status cursor-controlplane`. On headless servers run `loginctl enable-linger $USER` so the service starts without an interactive login. Logs: `journalctl --user -u cursor-controlplane.service -f` and a UTF-8 log file at `$XDG_DATA_HOME/cursor-controlplane/controlplane.log` (usually `~/.local/share/cursor-controlplane/controlplane.log`).
+- **macOS:** LaunchAgent `com.cursor.controlplane` in `~/Library/LaunchAgents/`. Same log file path under `$XDG_DATA_HOME/cursor-controlplane/` (defaults to `~/.local/share/cursor-controlplane/controlplane.log`).
+- **Windows:** Scheduled Task `CursorControlPlane` (runs at log on). Log file: `%LOCALAPPDATA%\cursor-controlplane\controlplane.log`.
+
+The installers set `CONTROL_PLANE_LOG_FILE` to that path so the process appends logs to the file while still writing to the console (where the service manager captures them). For a foreground run, leave `CONTROL_PLANE_LOG_FILE` unset to use console logging only, or set it in `.env` to log to a file as well.
 
 ### Uninstall
 

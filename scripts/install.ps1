@@ -47,7 +47,10 @@ New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 if ($WithService) {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 
-    $action = New-ScheduledTaskAction -Execute $exePath -Argument "serve" -WorkingDirectory $destDir
+    $logFile = Join-Path $dataDir "controlplane.log"
+    # Set CONTROL_PLANE_LOG_FILE for file logging (see README); cmd handles paths with spaces.
+    $cmdArgs = '/c set "CONTROL_PLANE_LOG_FILE=' + $logFile + '" && "' + $exePath + '" serve'
+    $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $cmdArgs -WorkingDirectory $destDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
@@ -56,6 +59,6 @@ if ($WithService) {
     $marker = @{ type = "scheduled-task"; name = $taskName } | ConvertTo-Json -Compress
     Set-Content -Path (Join-Path $dataDir "service.json") -Value $marker -Encoding utf8
 
-    Write-Host "Registered scheduled task: $taskName (run at logon; run: cursor-controlplane restart to reload config)"
+    Write-Host "Registered scheduled task: $taskName (log file: $logFile; run at logon; run: cursor-controlplane restart to reload config)"
     Write-Host "Configure with: cursor-controlplane configure"
 }
