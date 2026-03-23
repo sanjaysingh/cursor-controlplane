@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import logging
-import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from control_plane.api.routes import router as api_router, websocket_endpoint
 from control_plane.config import get_settings, parse_telegram_allowed_user_ids
 from control_plane.db import Database
+from control_plane.paths import database_path, static_package_dir
 from control_plane.events import EventHub
 from control_plane.channels.registry import ChannelRegistry
 from control_plane.channels.web_channel import WebChannel
@@ -24,13 +23,6 @@ from control_plane.state import AppState
 from control_plane.workspace_paths import resolve_workspace_root
 
 logger = logging.getLogger(__name__)
-
-
-def _database_path() -> Path:
-    override = (os.environ.get("CONTROL_PLANE_DB_PATH") or "").strip()
-    if override:
-        return Path(override)
-    return Path(__file__).resolve().parent.parent / "data" / "control_plane.db"
 
 
 @asynccontextmanager
@@ -68,7 +60,7 @@ def create_app() -> FastAPI:
     app_config, env = get_settings()
     hub = EventHub()
     registry = ChannelRegistry()
-    db = Database(_database_path())
+    db = Database(database_path())
     session_manager = SessionManager(db, app_config, env, registry, hub)
     web = WebChannel(hub)
     registry.register(web)
@@ -81,7 +73,7 @@ def create_app() -> FastAPI:
             )
         registry.register(TelegramChannel(env.telegram_bot_token, session_manager, allowed_ids))
 
-    static_dir = Path(__file__).resolve().parent / "static"
+    static_dir = static_package_dir()
 
     st = AppState(
         config=app_config,

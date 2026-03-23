@@ -1,0 +1,3 @@
+# PyInstaller and related build tooling (optional; for release binaries)
+-r requirements.txt
+pyinstaller>=6.0

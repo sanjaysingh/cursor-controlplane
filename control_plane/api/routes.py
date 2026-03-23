@@ -21,6 +21,7 @@ from control_plane.models import (
 from control_plane.acp_model_probe import probe_acp_model_options
 from control_plane.agent_models import list_cursor_models
 from control_plane.github_cli import gh_repo_clone, gh_repo_list
+from control_plane.constants import WEB_CHANNEL_KEY
 from control_plane.repo_picker import build_repo_picker_items
 from control_plane.session_manager import SessionLimitError
 from control_plane.state import AppState
@@ -31,10 +32,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _web_channel_key(st: AppState) -> str:
-    """Single web dashboard identity until auth; configurable via WEB_CHANNEL_KEY."""
-    k = (st.env.web_channel_key or "").strip()
-    return k if k else "web:default"
+def _web_channel_key(_st: AppState) -> str:
+    """Single web dashboard identity until auth (fixed constant)."""
+    return WEB_CHANNEL_KEY
 
 
 @router.get("/health")
@@ -44,7 +44,7 @@ async def health() -> dict[str, str]:
 
 @router.get("/dashboard-config")
 async def dashboard_config(request: Request) -> JSONResponse:
-    """Web UI: fixed web identity (matches WEB_CHANNEL_KEY / default participant for streams)."""
+    """Web UI: fixed web identity (default participant for streams)."""
     st: AppState = request.app.state.control_plane
     root = resolve_workspace_root(st.config, st.env)
     dm = await st.db.get_setting("default_model")

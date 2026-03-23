@@ -8,3 +8,6 @@ __pycache__/
 data/
 *.db
 node_modules/
+dist/
+build/
+*.spec.bak

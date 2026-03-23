@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            out_name: cursor-controlplane-linux-amd64
+          - os: macos-latest
+            out_name: cursor-controlplane-macos-arm64
+          - os: windows-latest
+            out_name: cursor-controlplane-windows-amd64.exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-build.txt
+
+      - name: PyInstaller
+        run: pyinstaller --noconfirm cursor-controlplane.spec
+
+      - name: Stage binary for upload
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp dist/cursor-controlplane.exe "${{ matrix.out_name }}"
+          else
+            cp dist/cursor-controlplane "${{ matrix.out_name }}"
+            chmod +x "${{ matrix.out_name }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.out_name }}
+          path: ${{ matrix.out_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Flatten artifacts for upload
+        run: |
+          mkdir -p flat
+          find release-assets -type f -name 'cursor-controlplane-*' -exec cp -v {} flat/ \;
+          ls -la flat
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            flat/cursor-controlplane-linux-amd64
+            flat/cursor-controlplane-macos-arm64
+            flat/cursor-controlplane-windows-amd64.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -58,6 +58,76 @@ Edit `config.yaml`:
 python run.py
 ```
 
+### First-run setup (interactive)
+
+If Telegram is enabled in `config.yaml`, no `TELEGRAM_BOT_TOKEN` is set in the environment, and the database has no stored token yet, the server prompts once on a **TTY** for bot token, allowlist, and basic options. Values are saved in SQLite (`app_settings`) and override env/YAML for those keys on the next start.
+
+### Configure without starting the server
+
+| Command | Purpose |
+|--------|---------|
+| `python run.py configure` or `python run.py configure wizard` | Full interactive wizard (writes DB) |
+| `python run.py configure show` | Print paths, env overrides, DB `app_settings`, and **resolved runtime** (workspace root, HTTP bind, channels, ACP, fixed `web_channel_key`, `session_default_model`); `NOT_SET` when unset; secrets shown in full when set. Does not dump `config.yaml`. |
+| `python run.py configure telegram-token <TOKEN>` | Store Telegram bot token |
+| `python run.py configure telegram-allowlist <ids>` | Comma- or space-separated user IDs |
+| `python run.py restart` | Restart the background service installed by `install.sh --with-service` / `install.ps1 -WithService` (reloads config from DB) |
+
+After `pip install -e .`, the same commands work as `cursor-controlplane ...`.
+
+**Priority:** stored settings in the DB override environment variables and `config.yaml` for the keys listed in [`control_plane/config.py`](control_plane/config.py) (e.g. Telegram token, allowlist, server host/port, `acp.command`).
+
+### Release binaries (GitHub Actions)
+
+Pushing a tag `v*` runs [`.github/workflows/release.yml`](.github/workflows/release.yml) and attaches PyInstaller **one-file** builds:
+
+- `cursor-controlplane-linux-amd64`
+- `cursor-controlplane-macos-arm64`
+- `cursor-controlplane-windows-amd64.exe`
+
+Local build (optional):
+
+```bash
+pip install -r requirements-build.txt
+pyinstaller --noconfirm cursor-controlplane.spec
+# dist/cursor-controlplane(.exe)
+```
+
+**Install from GitHub (examples)**
+
+Set `CONTROL_PLANE_REPO` to your `owner/repo`, then:
+
+| OS | Command |
+|----|---------|
+| Linux / macOS | `curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/install.sh \| bash` |
+| Windows (PowerShell) | `irm https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/install.ps1 \| iex` |
+
+Install scripts download the **latest** release asset and place the binary under `~/.local/bin` (Unix) or `%LOCALAPPDATA%\Programs\cursor-controlplane\` (Windows) and update user `PATH` where applicable.
+
+**Background service (one command):** to install the binary **and** register an auto-starting user service, use:
+
+| OS | Command |
+|----|---------|
+| Linux / macOS | `curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/install.sh \| bash -s -- --with-service` |
+| Linux / macOS (env) | `CONTROL_PLANE_INSTALL_SERVICE=1 bash install.sh` (after setting `CONTROL_PLANE_REPO`) |
+| Windows (PowerShell) | `$env:CONTROL_PLANE_INSTALL_SERVICE = "1"; irm ... \| iex` or download `install.ps1` and run `.\install.ps1 -WithService` |
+
+- **Linux:** systemd **user** unit `cursor-controlplane.service` (`systemctl --user status …`). On a headless server, user units may need **loginctl enable-linger $USER** so the service runs without an interactive login.
+- **macOS:** LaunchAgent `com.cursor.controlplane` in `~/Library/LaunchAgents/`.
+- **Windows:** a **Scheduled Task** `CursorControlPlane` (runs at log on).
+
+The install script writes `service.json` under the app data directory (see below). **`cursor-controlplane configure`** updates the **same** SQLite DB the service uses when you run the **installed** binary (not `python run.py` from a source checkout, which uses `./data/` by default). After changing configuration, run **`cursor-controlplane restart`** so the server reloads settings from the DB.
+
+**Data directory:** bundled / binary installs use a per-user data dir (SQLite and state): Linux/macOS `~/.local/share/cursor-controlplane/` (or `$XDG_DATA_HOME/cursor-controlplane/`), Windows `%APPDATA%\cursor-controlplane\`. Override with **`CONTROL_PLANE_DATA_DIR`** or **`CONTROL_PLANE_DB_PATH`**. Service metadata is stored next to the DB as `service.json` (override path with **`CONTROL_PLANE_SERVICE_MARKER`** if needed).
+
+**Uninstall (one script):** removes the **service** (if present), **binary**, and **data directory** (SQLite + `service.json`). Optional **`--keep-data`** / **`-KeepData`** keeps the DB folder.
+
+| OS | Command |
+|----|---------|
+| Linux / macOS | `curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/uninstall.sh \| bash` — non-interactive: `\| bash -s -- -y` or `CONTROL_PLANE_UNINSTALL_YES=1` |
+| Windows (PowerShell) | `irm https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/uninstall.ps1 \| iex` — or download and run `.\uninstall.ps1 -Yes` |
+
+Stop the running app first if the uninstaller cannot delete the executable. **`CONTROL_PLANE_DATA_DIR`** matches install when removing data (same as install scripts).
+
 ## Tests
 
 **Python (API, database, model parsing):** from the repo root, with dev dependencies installed:
@@ -82,7 +152,7 @@ Tests use a temporary SQLite file and config via `CONTROL_PLANE_DB_PATH` and `CO
 
 - Dashboard: `http://localhost:8080/` (adjust port in `config.yaml`; static assets are under `/assets/` so WebSocket `/ws` is not blocked). The UI uses **Tailwind CSS**, **Alpine.js**, **marked**, and **DOMPurify** (CDN) so chat messages render **Markdown** safely—no frontend build step.
 - **Sessions API**: `GET/POST /api/sessions` (optional `model` on create only), `GET /api/sessions/{id}/messages`, `POST /api/sessions/{id}/message`, `POST /api/sessions/{id}/close`, `POST /api/sessions/{id}/answer`, **`WebSocket /ws`**
-- **`GET /api/repo-picker`**: deduped **local** + **GitHub** entries for the New session dropdown · **`GET /api/workspaces`**, **`GET /api/github/repos`**, **`POST /api/github/clone`** (still available for integrations) · **`GET /api/dashboard-config`**: `web_channel_key` + **`workspace_root`**
+- **`GET /api/repo-picker`**: deduped **local** + **GitHub** entries for the New session dropdown · **`GET /api/workspaces`**, **`GET /api/github/repos`**, **`POST /api/github/clone`** (still available for integrations) · **`GET /api/dashboard-config`**: fixed `web_channel_key` (see `control_plane/constants.py`) + **`workspace_root`**
 - **`GET /api/models`**: exact ids from `agent models` / `--list-models` — **dashboard dropdown** uses these strings as both label and value (same as `agent --model <id>`). First row **Auto** = omit `--model`.
 - **`GET /api/models/acp?workspace=<dir>`**: optional ACP probe (diagnostics / advanced use); the web UI does not use it for the picker.
 - **Legacy aliases** (same UUID as session id): `GET/POST /api/runs`, `POST /api/runs/{id}/stop`, `POST /api/runs/{id}/answer`
@@ -99,7 +169,7 @@ Tests use a temporary SQLite file and config via `CONTROL_PLANE_DB_PATH` and `CO
 - **At most 5 sessions** total; close one before creating another.
 - **Chat title**: defaults to the **workspace folder name** (last segment of `repo_path`). Pass `title` on **`POST /api/sessions`** to override.
 - **One ACP process per open session**: follow-up messages use `session_prompt` on the same client — not a new subprocess per message.
-- **Model**: set **only when creating** a session — exact `agent --model` id, or **Auto** (omit `--model`). It cannot be changed after creation. If unset at creation, `CURSOR_AGENT_MODEL` / `acp.default_model` can still apply when spawning (see `session_manager._effective_model`).
+- **Model**: set **only when creating** a session — exact `agent --model` id, or **Auto** (omit `--model`). It cannot be changed after creation. If unset at creation, dashboard **default model** (SQLite) / `acp.default_model` can still apply when spawning (see `session_manager._effective_model`).
 - **Close** stops the agent and **removes** that session and its messages from the database (no separate “purge”).
 
 ## Telegram usage

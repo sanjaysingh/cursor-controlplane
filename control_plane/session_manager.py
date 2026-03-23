@@ -308,9 +308,6 @@ class SessionManager:
             # Session stored a placeholder like `current` — treat as unset; use env/config.
         if self._db_default_model:
             return self._db_default_model
-        env_m = (self.env.cursor_agent_model or "").strip()
-        if env_m:
-            return cli_model_id_for_argv(env_m)
         cfg_m = (self.app_config.acp.default_model or "").strip()
         return cli_model_id_for_argv(cfg_m) if cfg_m else None
 

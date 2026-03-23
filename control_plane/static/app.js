@@ -12,7 +12,7 @@
 
 function dashboard() {
   return {
-    /** Matches server WEB_CHANNEL_KEY (fetched from /api/dashboard-config). */
+    /** Matches server default web id (GET /api/dashboard-config web_channel_key; fixed in constants.py). */
     webChannelKey: "web:default",
     newRepoPath: "",
     newSessionModel: "",

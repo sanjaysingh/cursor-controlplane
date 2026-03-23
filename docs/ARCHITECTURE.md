@@ -16,7 +16,7 @@
 
 ## Agent sessions
 
-Each session has a `session_id` (UUID), `channel` + `channel_key` (e.g. web client id), **`repo_path`** (workspace), **`title`** (optional on create; default is the workspace folder basename), optional **`model`** (exact CLI id for `agent --model`, or **null** for Auto / then env `CURSOR_AGENT_MODEL` / `acp.default_model` if set), and `status`: **`open`** | **`closed`**.
+Each session has a `session_id` (UUID), `channel` + `channel_key` (e.g. web client id), **`repo_path`** (workspace), **`title`** (optional on create; default is the workspace folder basename), optional **`model`** (exact CLI id for `agent --model`, or **null** for Auto / then DB `default_model` preference / `acp.default_model` if set), and `status`: **`open`** | **`closed`**.
 
 - **While open**: a single **AcpClient** is kept for that session; multiple user messages reuse the same CLI/ACP connection.
 - **Close** (`POST /api/sessions/{id}/close`, legacy `POST /api/runs/{id}/stop`, Telegram `/session_close`): cancel pending questions, kill subprocess, **delete** the session row and messages from SQLite, emit **`session_removed`**, clear in-memory handle. **Close all** (`POST /api/sessions/close-all`) deletes every session (same as the former purge-all). At most **5** sessions may exist; creating another requires closing one first.
@@ -38,5 +38,7 @@ Implement `BaseChannel` (`channels/base.py`), register in `ChannelRegistry`, sta
 ## Configuration
 
 - `config.yaml`: repos, optional **`workspace_root`** (absolute or `~`; default **`~/cursor-control-plane`**), server bind, `acp.command` (default `agent`), `acp.default_model`, `acp.stream_update_mode`, `acp.extra_args`.
-- `.env`: `CURSOR_API_KEY`, `TELEGRAM_BOT_TOKEN`, optional `CURSOR_AGENT_MODEL`, optional **`CONTROL_PLANE_WORKSPACE_ROOT`** (overrides `workspace_root` in YAML).
+- `.env`: `CURSOR_API_KEY`, `TELEGRAM_BOT_TOKEN`, optional **`CONTROL_PLANE_WORKSPACE_ROOT`** (overrides `workspace_root` in YAML). Web dashboard participant id is fixed in code (`WEB_CHANNEL_KEY` in `control_plane/constants.py`).
+- **SQLite `app_settings`**: optional keys (Telegram token, allowlist, server host/port, `acp.command`, etc.) **override** matching env and YAML values when non-empty. See `SETTING_*` constants in `control_plane/config.py`. Interactive setup (`python run.py configure` / first-run wizard) writes here.
+- **Paths**: default DB is `data/control_plane.db` in dev; PyInstaller / release builds use a per-user data directory (see README). Override with **`CONTROL_PLANE_DB_PATH`** or **`CONTROL_PLANE_DATA_DIR`**.
 - **GitHub**: listing/cloning uses the **`gh`** CLI (`gh repo list`, `gh repo clone`); install `gh` and run `gh auth login` on the host running the control plane.

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cursor-controlplane"
+version = "0.1.0"
+description = "Cursor CLI control plane — Telegram and web dashboard to agent (ACP)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []  # Runtime deps remain in requirements.txt
+
+[project.scripts]
+cursor-controlplane = "control_plane.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["control_plane*"]
+
+[tool.setuptools.package-data]
+control_plane = ["static/**/*"]
