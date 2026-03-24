@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import pytest
 
+from control_plane import __version__
+
 
 def test_health(client):
     r = client.get("/api/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    assert r.json() == {"status": "ok", "version": __version__}
 
 
 def test_dashboard_config_includes_keys(client):

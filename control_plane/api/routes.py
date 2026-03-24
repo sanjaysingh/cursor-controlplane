@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
+from control_plane import __version__
 from control_plane.models import (
     AnswerQuestionRequest,
     CloneGithubRepoRequest,
@@ -39,7 +40,7 @@ def _web_channel_key(_st: AppState) -> str:
 
 @router.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "version": __version__}
 
 
 @router.get("/dashboard-config")

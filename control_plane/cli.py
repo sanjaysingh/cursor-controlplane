@@ -9,6 +9,7 @@ import sys
 
 import uvicorn
 
+from control_plane import __version__
 from control_plane.app import create_app
 from control_plane.config import get_settings
 from control_plane.db import Database
@@ -58,7 +59,7 @@ async def _configure_wizard() -> None:
 
 
 _COMMAND_ALIASES = {"config": "configure"}
-_PRIMARY_COMMANDS = frozenset({"serve", "configure", "restart"})
+_PRIMARY_COMMANDS = frozenset({"serve", "configure", "restart", "version"})
 
 
 def _resolve_command(raw: str) -> str:
@@ -78,7 +79,7 @@ def _resolve_command(raw: str) -> str:
         )
     else:
         print(
-            f"Unknown command {raw!r}. Choose: serve | configure (alias: config) | restart",
+            f"Unknown command {raw!r}. Choose: serve | configure (alias: config) | restart | version",
             file=sys.stderr,
         )
     raise SystemExit(2)
@@ -89,11 +90,16 @@ def main() -> None:
         description="Cursor CLI Control Plane - web + Telegram to agent (ACP).",
     )
     parser.add_argument(
+        "--version",
+        action="version",
+        version=f"cursor-controlplane {__version__}",
+    )
+    parser.add_argument(
         "command",
         nargs="?",
         default="serve",
         metavar="COMMAND",
-        help="serve | configure (alias: config) | restart",
+        help="serve | configure (alias: config) | restart | version",
     )
     parser.add_argument(
         "configure_args",
@@ -107,6 +113,9 @@ def main() -> None:
         from control_plane.service_control import restart_service
 
         raise SystemExit(restart_service())
+    if command == "version":
+        print(__version__)
+        return
     if command == "configure":
         _handle_configure(list(args.configure_args))
         return
