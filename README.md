@@ -48,11 +48,11 @@ irm https://raw.githubusercontent.com/sanjaysingh/cursor-controlplane/main/scrip
 Rerunning either installer upgrades an existing service in place: it stops the current service instance, replaces the binary, then starts a single fresh instance.
 
 Services created:
-- **Linux:** systemd user unit `cursor-controlplane.service` — check with `systemctl --user status cursor-controlplane`. On headless servers run `loginctl enable-linger $USER` so the service starts without an interactive login. Logs: `journalctl --user -u cursor-controlplane.service -f` and a UTF-8 log file at `$XDG_DATA_HOME/cursor-controlplane/controlplane.log` (usually `~/.local/share/cursor-controlplane/controlplane.log`).
-- **macOS:** LaunchAgent `com.cursor.controlplane` in `~/Library/LaunchAgents/`. Same log file path under `$XDG_DATA_HOME/cursor-controlplane/` (defaults to `~/.local/share/cursor-controlplane/controlplane.log`).
-- **Windows:** Scheduled Task `CursorControlPlane` (runs at log on). Log file: `%APPDATA%\cursor-controlplane\controlplane.log`.
+- **Linux:** systemd user unit `cursor-controlplane.service` — check with `systemctl --user status cursor-controlplane`. On headless servers run `loginctl enable-linger $USER` so the service starts without an interactive login. Logs: `journalctl --user -u cursor-controlplane.service -f` and daily UTF-8 log files under `$XDG_DATA_HOME/cursor-controlplane/` (usually `~/.local/share/cursor-controlplane/`, for example `controlplane-2026-03-24.log`).
+- **macOS:** LaunchAgent `com.cursor.controlplane` in `~/Library/LaunchAgents/`. Same daily log file pattern under `$XDG_DATA_HOME/cursor-controlplane/`.
+- **Windows:** Scheduled Task `CursorControlPlane` (runs at log on). Daily log files under `%APPDATA%\cursor-controlplane\`.
 
-The installers set `CONTROL_PLANE_LOG_FILE` to that path so the process appends logs to the file while still writing to the console (where the service manager captures them). For a foreground run, leave `CONTROL_PLANE_LOG_FILE` unset to use console logging only, or set it in `.env` to log to a file as well.
+The installers set `CONTROL_PLANE_LOG_FILE` to a base path for daily file logging while the process still writes to the console (where the service manager captures it). The app writes one log file per day and automatically removes managed log files older than 7 days. For a foreground run, leave `CONTROL_PLANE_LOG_FILE` unset to use console logging only, or set it in `.env` to enable the same daily file logging.
 
 ### Uninstall
 

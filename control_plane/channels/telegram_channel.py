@@ -116,6 +116,8 @@ class TelegramChannel(BaseChannel):
             await self._bot.delete_my_commands(scope=BotCommandScopeDefault())
         except TelegramBadRequest as e:
             logger.warning("Could not clear default Telegram command list: %s", e)
+        except Exception:
+            logger.exception("Could not clear default Telegram command list")
         for uid in sorted(self._allowed_user_ids):
             try:
                 await self._bot.set_my_commands(
@@ -128,6 +130,11 @@ class TelegramChannel(BaseChannel):
                     "(may need to start the bot first in Telegram): %s",
                     uid,
                     e,
+                )
+            except Exception:
+                logger.exception(
+                    "Could not set Telegram commands for allowed user %s",
+                    uid,
                 )
 
     async def start(self) -> None:
@@ -471,20 +478,33 @@ class TelegramChannel(BaseChannel):
         self._task = asyncio.create_task(dp.start_polling(self._bot))
 
     async def stop(self) -> None:
-        if self._dp and self._bot:
+        dp = self._dp
+        bot = self._bot
+        task = self._task
+
+        if dp and bot:
             try:
-                await self._dp.stop_polling()
+                await dp.stop_polling()
             except RuntimeError as e:
                 if "Polling is not started" not in str(e):
                     raise
-            await self._bot.session.close()
-        if self._task:
-            self._task.cancel()
+
+        if task:
             try:
-                await self._task
+                # Let aiogram finish its own polling shutdown before closing the shared HTTP session.
+                await asyncio.wait_for(task, timeout=10.0)
+            except asyncio.TimeoutError:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             except asyncio.CancelledError:
                 pass
             self._task = None
+
+        if bot:
+            await bot.session.close()
         self._bot = None
         self._dp = None
 

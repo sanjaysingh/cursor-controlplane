@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -26,18 +27,92 @@ from control_plane.workspace_paths import resolve_workspace_root
 logger = logging.getLogger(__name__)
 
 _LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
+_LOG_RETENTION_DAYS = 7
+
+
+class DailyFileHandler(logging.Handler):
+    """Write logs into one file per day and prune old files."""
+
+    def __init__(self, base_path: Path, *, retention_days: int = _LOG_RETENTION_DAYS) -> None:
+        super().__init__()
+        self.base_path = base_path.expanduser().resolve()
+        self.retention_days = retention_days
+        self._current_day: date | None = None
+        self._last_cleanup_day: date | None = None
+        self._file_handler: logging.FileHandler | None = None
+        self.base_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_handler(datetime.now())
+        self._cleanup_old_logs(datetime.now())
+
+    def _daily_path(self, day: date) -> Path:
+        stem = self.base_path.stem
+        suffix = self.base_path.suffix
+        return self.base_path.with_name(f"{stem}-{day.isoformat()}{suffix}")
+
+    def _is_managed_log_file(self, path: Path) -> bool:
+        if path.parent != self.base_path.parent or not path.is_file():
+            return False
+        stem = self.base_path.stem
+        suffix = self.base_path.suffix
+        prefix = f"{stem}-"
+        return path.name.startswith(prefix) and path.name.endswith(suffix)
+
+    def _ensure_handler(self, now: datetime) -> None:
+        today = now.date()
+        if self._current_day == today and self._file_handler:
+            return
+        if self._file_handler:
+            self._file_handler.close()
+        self._current_day = today
+        fh = logging.FileHandler(self._daily_path(today), encoding="utf-8")
+        fh.setFormatter(self.formatter or logging.Formatter(_LOG_FORMAT))
+        self._file_handler = fh
+
+    def _cleanup_old_logs(self, now: datetime) -> None:
+        if self._last_cleanup_day == now.date():
+            return
+        self._last_cleanup_day = now.date()
+        cutoff = now - timedelta(days=self.retention_days)
+        for candidate in self.base_path.parent.iterdir():
+            if not self._is_managed_log_file(candidate):
+                continue
+            try:
+                if datetime.fromtimestamp(candidate.stat().st_mtime) < cutoff:
+                    candidate.unlink()
+            except OSError:
+                continue
+
+    def setFormatter(self, fmt: logging.Formatter) -> None:  # noqa: N802 - stdlib API
+        super().setFormatter(fmt)
+        if self._file_handler:
+            self._file_handler.setFormatter(fmt)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        now = datetime.now()
+        self._ensure_handler(now)
+        self._cleanup_old_logs(now)
+        if self._file_handler:
+            self._file_handler.emit(record)
+
+    def close(self) -> None:
+        try:
+            if self._file_handler:
+                self._file_handler.close()
+                self._file_handler = None
+        finally:
+            super().close()
 
 
 def _attach_log_file(path: Path) -> None:
-    """Append a UTF-8 file handler to the root logger (keeps existing console/uvicorn handlers)."""
+    """Append a daily rotating UTF-8 file handler to the root logger."""
     path = path.expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     resolved = str(path.resolve())
     root = logging.getLogger()
     for h in root.handlers:
-        if isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", None) == resolved:
+        if isinstance(h, DailyFileHandler) and str(h.base_path) == resolved:
             return
-    fh = logging.FileHandler(path, encoding="utf-8")
+    fh = DailyFileHandler(path)
     fh.setFormatter(logging.Formatter(_LOG_FORMAT))
     root.addHandler(fh)
 
@@ -58,8 +133,11 @@ async def lifespan(app: FastAPI):
     await st.registry.get("web").start()
     tg = st.registry.all().get("telegram")
     if tg:
-        await tg.start()
-        logger.info("Telegram channel started")
+        try:
+            await tg.start()
+            logger.info("Telegram channel started")
+        except Exception:
+            logger.exception("Telegram channel failed to start; continuing without Telegram")
     else:
         logger.info("Telegram channel disabled or missing token")
 
