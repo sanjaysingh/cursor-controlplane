@@ -4,7 +4,7 @@
 #   .\uninstall.ps1
 #   .\uninstall.ps1 -Yes
 #   $env:CONTROL_PLANE_UNINSTALL_YES = "1"; .\uninstall.ps1
-#   .\uninstall.ps1 -KeepData   # remove task + binary only; keep %LOCALAPPDATA%\cursor-controlplane\
+#   .\uninstall.ps1 -KeepData   # remove task + binary only; keep %APPDATA%\cursor-controlplane\
 
 param(
     [switch]$Yes,
@@ -19,8 +19,23 @@ if ($env:CONTROL_PLANE_UNINSTALL_YES -eq "1") {
 
 $destDir = Join-Path $env:LOCALAPPDATA "Programs\cursor-controlplane"
 $exePath = Join-Path $destDir "cursor-controlplane.exe"
-$dataDir = Join-Path $env:LOCALAPPDATA "cursor-controlplane"
 $taskName = "CursorControlPlane"
+
+function Get-ControlPlaneDataDir {
+    if ($env:CONTROL_PLANE_DATA_DIR) {
+        return $env:CONTROL_PLANE_DATA_DIR
+    }
+    if ($env:APPDATA) {
+        return (Join-Path $env:APPDATA "cursor-controlplane")
+    }
+    if ($env:LOCALAPPDATA) {
+        return (Join-Path $env:LOCALAPPDATA "cursor-controlplane")
+    }
+    return (Join-Path $HOME "AppData\Roaming\cursor-controlplane")
+}
+
+$dataDir = Get-ControlPlaneDataDir
+$legacyDataDir = Join-Path $env:LOCALAPPDATA "cursor-controlplane"
 
 if ($env:CONTROL_PLANE_DATA_DIR) {
     $dataDir = $env:CONTROL_PLANE_DATA_DIR
@@ -57,6 +72,10 @@ if (-not $KeepData) {
         Write-Host "Removed $dataDir"
     } else {
         Write-Host "Data folder not found: $dataDir (skipping)"
+    }
+    if ($legacyDataDir -and ($legacyDataDir -ne $dataDir) -and (Test-Path $legacyDataDir)) {
+        Remove-Item -Recurse -Force $legacyDataDir
+        Write-Host "Removed legacy data folder: $legacyDataDir"
     }
 } else {
     Write-Host "Kept data folder: $dataDir"

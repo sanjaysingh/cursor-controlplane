@@ -27,12 +27,69 @@ $asset = "cursor-controlplane-windows-amd64.exe"
 $url = "https://github.com/$repo/releases/latest/download/$asset"
 $destDir = Join-Path $env:LOCALAPPDATA "Programs\cursor-controlplane"
 $exePath = Join-Path $destDir "cursor-controlplane.exe"
-$dataDir = Join-Path $env:LOCALAPPDATA "cursor-controlplane"
 $taskName = "CursorControlPlane"
+
+function Get-ControlPlaneDataDir {
+    if ($env:CONTROL_PLANE_DATA_DIR) {
+        return $env:CONTROL_PLANE_DATA_DIR
+    }
+    if ($env:APPDATA) {
+        return (Join-Path $env:APPDATA "cursor-controlplane")
+    }
+    if ($env:LOCALAPPDATA) {
+        return (Join-Path $env:LOCALAPPDATA "cursor-controlplane")
+    }
+    return (Join-Path $HOME "AppData\Roaming\cursor-controlplane")
+}
+
+function Stop-ControlPlaneTask {
+    param(
+        [string]$TaskName
+    )
+
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $task) {
+        return $false
+    }
+
+    Write-Host "Stopping existing scheduled task: $TaskName"
+    try {
+        Stop-ScheduledTask -InputObject $task -ErrorAction SilentlyContinue
+    } catch {
+        $null
+    }
+
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        Start-Sleep -Milliseconds 500
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if (-not $task -or $task.State -ne "Running") {
+            break
+        }
+    } while ((Get-Date) -lt $deadline)
+
+    return $true
+}
+
+$dataDir = Get-ControlPlaneDataDir
+$serviceInstalled = [bool](Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)
+$shouldInstallService = $WithService -or $serviceInstalled
+
+if ($serviceInstalled) {
+    [void](Stop-ControlPlaneTask -TaskName $taskName)
+}
 
 New-Item -ItemType Directory -Force -Path $destDir | Out-Null
 Write-Host "Downloading $url ..."
-Invoke-WebRequest -Uri $url -OutFile $exePath -UseBasicParsing
+$tmpExe = Join-Path ([System.IO.Path]::GetTempPath()) ("cursor-controlplane-" + [System.Guid]::NewGuid().ToString("N") + ".exe")
+try {
+    Invoke-WebRequest -Uri $url -OutFile $tmpExe -UseBasicParsing
+    Move-Item -Path $tmpExe -Destination $exePath -Force
+} finally {
+    if (Test-Path $tmpExe) {
+        Remove-Item -Force $tmpExe -ErrorAction SilentlyContinue
+    }
+}
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$destDir*") {
@@ -44,7 +101,7 @@ Write-Host "Installed $exePath"
 
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 
-if ($WithService) {
+if ($shouldInstallService) {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 
     $logFile = Join-Path $dataDir "controlplane.log"

@@ -62,6 +62,9 @@ REPO="${CONTROL_PLANE_REPO:-sanjaysingh/cursor-controlplane}"
 
 uname_s="$(uname -s)"
 uname_m="$(uname -m)"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/cursor-controlplane"
+SYSTEMD_UNIT="${HOME}/.config/systemd/user/cursor-controlplane.service"
+PLIST="${HOME}/Library/LaunchAgents/com.cursor.controlplane.plist"
 case "${uname_s}-${uname_m}" in
   Linux-x86_64|Linux-amd64)
     ASSET="cursor-controlplane-linux-amd64"
@@ -80,6 +83,46 @@ case "${uname_s}-${uname_m}" in
 esac
 
 check_dependencies
+
+service_installed=false
+case "$uname_s" in
+  Linux)
+    if [[ -f "${SYSTEMD_UNIT}" ]]; then
+      service_installed=true
+    fi
+    ;;
+  Darwin)
+    if [[ -f "${PLIST}" ]]; then
+      service_installed=true
+    fi
+    ;;
+esac
+
+should_install_service=false
+if [[ "$WITH_SERVICE" == true || "$service_installed" == true ]]; then
+  should_install_service=true
+fi
+
+stop_linux_service() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return
+  fi
+  echo "Stopping existing systemd user service..." >&2
+  systemctl --user stop cursor-controlplane.service 2>/dev/null || true
+}
+
+stop_macos_service() {
+  echo "Stopping existing LaunchAgent..." >&2
+  launchctl bootout "gui/$(id -u)/com.cursor.controlplane" 2>/dev/null || true
+  launchctl unload "${PLIST}" 2>/dev/null || true
+}
+
+if [[ "$service_installed" == true ]]; then
+  case "$uname_s" in
+    Linux) stop_linux_service ;;
+    Darwin) stop_macos_service ;;
+  esac
+fi
 
 URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 TMP="$(mktemp)"
@@ -100,7 +143,6 @@ if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
   echo "  export PATH=\"\$HOME/.local/bin:\$PATH\"" >&2
 fi
 
-DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/cursor-controlplane"
 mkdir -p "$DATA_DIR"
 
 install_linux_service() {
@@ -126,7 +168,9 @@ RestartSec=5
 WantedBy=default.target
 EOF
   systemctl --user daemon-reload
-  systemctl --user enable --now cursor-controlplane.service
+  systemctl --user enable cursor-controlplane.service >/dev/null
+  systemctl --user reset-failed cursor-controlplane.service 2>/dev/null || true
+  systemctl --user start cursor-controlplane.service
   printf '%s\n' '{"type":"systemd-user","unit":"cursor-controlplane.service"}' >"${DATA_DIR}/service.json"
   echo "Installed systemd user service: cursor-controlplane.service (logs: journalctl --user -u cursor-controlplane.service -f, and ${DATA_DIR}/controlplane.log)" >&2
 }
@@ -169,7 +213,7 @@ PLIST
   echo "Installed LaunchAgent: $plist (log file: ${DATA_DIR}/controlplane.log; restart: cursor-controlplane restart)" >&2
 }
 
-if [[ "$WITH_SERVICE" == true ]]; then
+if [[ "$should_install_service" == true ]]; then
   case "$uname_s" in
     Linux) install_linux_service ;;
     Darwin) install_macos_service ;;
