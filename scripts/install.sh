@@ -177,6 +177,7 @@ EOF
 
 install_macos_service() {
   local plist="${HOME}/Library/LaunchAgents/com.cursor.controlplane.plist"
+  local launchd_path="${BIN_DIR}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   mkdir -p "${HOME}/Library/LaunchAgents"
   cat >"$plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -194,6 +195,8 @@ install_macos_service() {
   <dict>
     <key>CONTROL_PLANE_LOG_FILE</key>
     <string>${DATA_DIR}/controlplane.log</string>
+    <key>PATH</key>
+    <string>${launchd_path}</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

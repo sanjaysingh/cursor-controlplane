@@ -26,7 +26,8 @@ from control_plane.workspace_paths import resolve_workspace_root
 
 logger = logging.getLogger(__name__)
 
-_LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+_LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 _LOG_RETENTION_DAYS = 7
 
 
@@ -65,7 +66,7 @@ class DailyFileHandler(logging.Handler):
             self._file_handler.close()
         self._current_day = today
         fh = logging.FileHandler(self._daily_path(today), encoding="utf-8")
-        fh.setFormatter(self.formatter or logging.Formatter(_LOG_FORMAT))
+        fh.setFormatter(self.formatter or logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATE_FORMAT))
         self._file_handler = fh
 
     def _cleanup_old_logs(self, now: datetime) -> None:
@@ -113,7 +114,7 @@ def _attach_log_file(path: Path) -> None:
         if isinstance(h, DailyFileHandler) and str(h.base_path) == resolved:
             return
     fh = DailyFileHandler(path)
-    fh.setFormatter(logging.Formatter(_LOG_FORMAT))
+    fh.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATE_FORMAT))
     root.addHandler(fh)
 
 
@@ -152,7 +153,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app_config, env = get_settings()
-    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT, datefmt=_LOG_DATE_FORMAT)
     if (env.log_file or "").strip():
         _attach_log_file(Path(env.log_file.strip()))
     hub = EventHub()
