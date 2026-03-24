@@ -12,6 +12,29 @@
 
 set -euo pipefail
 
+# Dependency checks
+check_dependencies() {
+  local missing=()
+  if ! command -v git >/dev/null 2>&1; then
+    missing+=("git")
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    missing+=("gh (GitHub CLI)")
+  fi
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Error: Missing required dependencies: ${missing[*]}" >&2
+    echo "Please install them before continuing:" >&2
+    echo "  - git: https://git-scm.com/downloads" >&2
+    echo "  - gh: https://cli.github.com/" >&2
+    if [[ "$uname_s" == "Darwin" ]]; then
+      echo "  Hint: brew install git gh" >&2
+    elif [[ "$uname_s" == "Linux" ]]; then
+      echo "  Hint: sudo apt install git  # and download gh from GitHub" >&2
+    fi
+    exit 1
+  fi
+}
+
 WITH_SERVICE=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -55,6 +78,8 @@ case "${uname_s}-${uname_m}" in
     exit 1
     ;;
 esac
+
+check_dependencies
 
 URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 TMP="$(mktemp)"

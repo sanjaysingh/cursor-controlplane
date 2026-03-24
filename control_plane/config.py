@@ -128,6 +128,11 @@ class EnvSettings(BaseSettings):
         validation_alias=AliasChoices("log_file", "CONTROL_PLANE_LOG_FILE"),
         description="Append app + uvicorn logs to this path (UTF-8). Empty = console only from defaults.",
     )
+    path: str = Field(
+        default="",
+        validation_alias=AliasChoices("path", "PATH"),
+        description="Extend PATH for subprocesses (gh, git, etc). Prepend to current PATH when set.",
+    )
 
 
 def _parse_bool(raw: str | None) -> bool | None:
@@ -206,12 +211,24 @@ def load_yaml_config(path: Path | None = None) -> AppConfig:
     return AppConfig.model_validate(data)
 
 
+def _apply_path_env(env: EnvSettings) -> None:
+    """If custom PATH is set, prepend to os.environ['PATH'] for subprocess visibility."""
+    custom_path = (env.path or "").strip()
+    if not custom_path:
+        return
+    current = os.environ.get("PATH", "")
+    if custom_path not in current:
+        os.environ["PATH"] = f"{custom_path}{':' if current else ''}{current}"
+        logger.debug("Extended PATH with: %s", custom_path)
+
+
 def get_settings() -> tuple[AppConfig, EnvSettings]:
     """Load YAML + env, then apply SQLite app_settings (highest priority for stored keys)."""
     from control_plane.paths import database_path
 
     app_config = load_yaml_config()
     env = EnvSettings()
+    _apply_path_env(env)
     overrides = load_db_overrides(database_path())
     merge_env_from_db(env, overrides)
     app_config = merge_app_config_from_db(app_config, overrides)
