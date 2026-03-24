@@ -1,5 +1,8 @@
 # Cursor CLI Control Plane
 
+[![CI](https://github.com/sanjaysingh/cursor-controlplane/actions/workflows/ci.yml/badge.svg)](https://github.com/sanjaysingh/cursor-controlplane/actions/workflows/ci.yml)
+[![Release](https://github.com/sanjaysingh/cursor-controlplane/actions/workflows/release.yml/badge.svg)](https://github.com/sanjaysingh/cursor-controlplane/actions/workflows/release.yml)
+
 Turn your personal machine into a remotely operated Cursor workstation: `cursor-controlplane` lets you start and control persistent **Cursor CLI** sessions from **Telegram** or a **web dashboard**, so you can review code, make changes, create commits, and open pull requests from anywhere while everything runs securely on your own computer.
 
 ## Prerequisites
