@@ -46,6 +46,51 @@ fi
 SYSTEMD_UNIT="${HOME}/.config/systemd/user/cursor-controlplane.service"
 PLIST="${HOME}/Library/LaunchAgents/com.cursor.controlplane.plist"
 
+list_macos_service_pids() {
+  ps -axo pid=,uid=,command= | awk -v uid="$(id -u)" -v bin="$BIN" '
+    $2 == uid && $3 == bin && $4 == "serve" { print $1 }
+  '
+}
+
+wait_for_macos_process_exit() {
+  local waited=0
+  while [[ "$waited" -lt 10 ]]; do
+    if [[ -z "$(list_macos_service_pids)" ]]; then
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+kill_macos_stale_processes() {
+  local pids
+  pids="$(list_macos_service_pids)"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+  echo "Stopping stale cursor-controlplane processes..." >&2
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" 2>/dev/null || true
+  done <<< "$pids"
+  if wait_for_macos_process_exit; then
+    return 0
+  fi
+  echo "Force-killing stale cursor-controlplane processes..." >&2
+  pids="$(list_macos_service_pids)"
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill -9 "$pid" 2>/dev/null || true
+  done <<< "$pids"
+  if wait_for_macos_process_exit; then
+    return 0
+  fi
+  echo "Could not stop stale cursor-controlplane processes." >&2
+  return 1
+}
+
 if [[ "$YES" != true ]]; then
   read -r -p "Uninstall cursor-controlplane (service, binary, data)? [y/N] " reply
   r=$(printf '%s' "${reply:-}" | tr '[:upper:]' '[:lower:]')
@@ -69,8 +114,10 @@ fi
 
 # --- macOS: LaunchAgent ---
 if [[ "$uname_s" == "Darwin" ]]; then
+  launchctl bootout "gui/$(id -u)" "${PLIST}" 2>/dev/null || true
   launchctl bootout "gui/$(id -u)/com.cursor.controlplane" 2>/dev/null || true
   launchctl unload "${PLIST}" 2>/dev/null || true
+  kill_macos_stale_processes
   rm -f "${PLIST}"
 fi
 

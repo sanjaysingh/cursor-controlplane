@@ -62,6 +62,8 @@ REPO="${CONTROL_PLANE_REPO:-sanjaysingh/cursor-controlplane}"
 
 uname_s="$(uname -s)"
 uname_m="$(uname -m)"
+BIN_DIR="${HOME}/.local/bin"
+BIN="${BIN_DIR}/cursor-controlplane"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/cursor-controlplane"
 SYSTEMD_UNIT="${HOME}/.config/systemd/user/cursor-controlplane.service"
 PLIST="${HOME}/Library/LaunchAgents/com.cursor.controlplane.plist"
@@ -111,10 +113,69 @@ stop_linux_service() {
   systemctl --user stop cursor-controlplane.service 2>/dev/null || true
 }
 
+list_macos_service_pids() {
+  ps -axo pid=,uid=,command= | awk -v uid="$(id -u)" -v bin="$BIN" '
+    $2 == uid && $3 == bin && $4 == "serve" { print $1 }
+  '
+}
+
+wait_for_macos_process_exit() {
+  local waited=0
+  while [[ "$waited" -lt 10 ]]; do
+    if [[ -z "$(list_macos_service_pids)" ]]; then
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+wait_for_macos_process_start() {
+  local waited=0
+  while [[ "$waited" -lt 10 ]]; do
+    if [[ -n "$(list_macos_service_pids)" ]]; then
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+kill_macos_stale_processes() {
+  local pids
+  pids="$(list_macos_service_pids)"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+  echo "Stopping stale cursor-controlplane processes..." >&2
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" 2>/dev/null || true
+  done <<< "$pids"
+  if wait_for_macos_process_exit; then
+    return 0
+  fi
+  echo "Force-killing stale cursor-controlplane processes..." >&2
+  pids="$(list_macos_service_pids)"
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill -9 "$pid" 2>/dev/null || true
+  done <<< "$pids"
+  if wait_for_macos_process_exit; then
+    return 0
+  fi
+  echo "Could not stop stale cursor-controlplane processes." >&2
+  return 1
+}
+
 stop_macos_service() {
   echo "Stopping existing LaunchAgent..." >&2
+  launchctl bootout "gui/$(id -u)" "${PLIST}" 2>/dev/null || true
   launchctl bootout "gui/$(id -u)/com.cursor.controlplane" 2>/dev/null || true
   launchctl unload "${PLIST}" 2>/dev/null || true
+  kill_macos_stale_processes
 }
 
 if [[ "$service_installed" == true ]]; then
@@ -132,10 +193,8 @@ echo "Downloading ${URL} ..." >&2
 curl -fsSL -o "$TMP" "$URL"
 chmod +x "$TMP"
 
-BIN_DIR="${HOME}/.local/bin"
 mkdir -p "$BIN_DIR"
 install -m 755 "$TMP" "${BIN_DIR}/cursor-controlplane"
-BIN="${BIN_DIR}/cursor-controlplane"
 
 echo "Installed ${BIN}" >&2
 if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
@@ -205,12 +264,19 @@ install_macos_service() {
 </dict>
 </plist>
 PLIST
+  launchctl bootout "gui/$(id -u)" "${plist}" 2>/dev/null || true
   launchctl bootout "gui/$(id -u)/com.cursor.controlplane" 2>/dev/null || true
+  launchctl unload "${plist}" 2>/dev/null || true
+  kill_macos_stale_processes
   if launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null; then
     :
   else
     launchctl unload "$plist" 2>/dev/null || true
     launchctl load "$plist"
+  fi
+  if ! wait_for_macos_process_start; then
+    echo "LaunchAgent did not start cursor-controlplane successfully." >&2
+    exit 1
   fi
   printf '%s\n' '{"type":"launchd","label":"com.cursor.controlplane"}' >"${DATA_DIR}/service.json"
   echo "Installed LaunchAgent: $plist (log file: ${DATA_DIR}/controlplane.log; restart: cursor-controlplane restart)" >&2
