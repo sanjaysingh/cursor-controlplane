@@ -98,14 +98,14 @@ class TelegramChannel(BaseChannel):
     def _bot_command_list(self) -> list[BotCommand]:
         return [
             BotCommand(command="start", description="Show help"),
-            BotCommand(command="session-list", description="List sessions & connect"),
-            BotCommand(command="model-list", description="List models & set default"),
-            BotCommand(command="model-default", description="Show the current default model"),
-            BotCommand(command="session-current", description="Show current session details"),
-            BotCommand(command="session-close", description="Close current session (stop agent)"),
-            BotCommand(command="session-close-all", description="Close all sessions (stop all agents)"),
-            BotCommand(command="repo-list", description="GitHub repos (gh)"),
-            BotCommand(command="workspace-list", description="Local workspace folders"),
+            BotCommand(command="session_list", description="List sessions & connect"),
+            BotCommand(command="model_list", description="List models & set default"),
+            BotCommand(command="model_default", description="Show the current default model"),
+            BotCommand(command="session_current", description="Show current session details"),
+            BotCommand(command="session_close", description="Close current session (stop agent)"),
+            BotCommand(command="session_closeall", description="Close all sessions (stop all agents)"),
+            BotCommand(command="repo_list", description="GitHub repos (gh)"),
+            BotCommand(command="workspace_list", description="Local workspace folders"),
         ]
 
     async def _sync_bot_commands(self) -> None:
@@ -152,18 +152,18 @@ class TelegramChannel(BaseChannel):
         async def cmd_start(message: Message) -> None:
             await message.answer(
                 "Cursor Control Plane.\n"
-                "/repo-list — GitHub repos (gh CLI); tap to clone & use\n"
-                "/workspace-list — folders under your workspace root; tap to use\n"
-                "/session-list — list & connect to any session\n"
-                "/model-list — CLI models; tap to set default for new sessions\n"
-                "/model-default — show the current default model\n"
-                "/session-current — show current session details\n"
-                "/session-close — stop the current agent\n"
-                "/session-close-all — close all sessions\n"
+                "/repo_list — GitHub repos (gh CLI); tap to clone & use\n"
+                "/workspace_list — folders under your workspace root; tap to use\n"
+                "/session_list — list & connect to any session\n"
+                "/model_list — CLI models; tap to set default for new sessions\n"
+                "/model_default — show the current default model\n"
+                "/session_current — show current session details\n"
+                "/session_close — stop the current agent\n"
+                "/session_closeall — close all sessions\n"
                 "Send text — starts a new session or continues the active one"
             )
 
-        @dp.message(Command("repo-list"))
+        @dp.message(Command("repo_list"))
         async def cmd_repos(message: Message) -> None:
             assert message.chat
             chat_id = str(message.chat.id)
@@ -190,7 +190,7 @@ class TelegramChannel(BaseChannel):
             kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
             await message.answer(text[:4000], reply_markup=kb)
 
-        @dp.message(Command("workspace-list"))
+        @dp.message(Command("workspace_list"))
         async def cmd_workspaces(message: Message) -> None:
             assert message.chat
             chat_id = str(message.chat.id)
@@ -199,7 +199,7 @@ class TelegramChannel(BaseChannel):
             if not entries:
                 await message.answer(
                     f"No workspace folders yet under:\n{root}\n\n"
-                    "Use /repo-list to clone a repo, or add folders there."
+                    "Use /repo_list to clone a repo, or add folders there."
                 )
                 return
             paths: list[str] = []
@@ -218,7 +218,7 @@ class TelegramChannel(BaseChannel):
             kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
             await message.answer(text[:4000], reply_markup=kb)
 
-        @dp.message(Command("session-list"))
+        @dp.message(Command("session_list"))
         async def cmd_sessions(message: Message) -> None:
             assert message.chat
             chat_id = str(message.chat.id)
@@ -238,7 +238,7 @@ class TelegramChannel(BaseChannel):
             kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
             await message.answer("Sessions — tap to connect:", reply_markup=kb)
 
-        @dp.message(Command("model-list"))
+        @dp.message(Command("model_list"))
         async def cmd_models(message: Message) -> None:
             assert message.chat
             chat_id = str(message.chat.id)
@@ -299,14 +299,14 @@ class TelegramChannel(BaseChannel):
                 return
             lst = self._telegram_model_ids.get(chat_id)
             if not lst or not (0 <= idx < len(lst)):
-                await cb.answer("List expired — send /model-list again.", show_alert=True)
+                await cb.answer("List expired — send /model_list again.", show_alert=True)
                 return
             model_id = lst[idx]
             await sm.set_default_model_preference(model_id)
             await cb.answer("OK")
             await cb.message.answer(f"Default model set to:\n{model_id}")
 
-        @dp.message(Command("model-default"))
+        @dp.message(Command("model_default"))
         async def cmd_default_model(message: Message) -> None:
             assert message.chat
             db_model = await sm.db.get_setting("default_model") or ""
@@ -317,9 +317,9 @@ class TelegramChannel(BaseChannel):
             if cfg_model:
                 await message.answer(f"Default model: {cfg_model}\n\nSource: config.yaml (acp.default_model)")
                 return
-            await message.answer("Default model: Auto (no --model flag)\n\nSet with /model-list or config.yaml")
+            await message.answer("Default model: Auto (no --model flag)\n\nSet with /model_list or config.yaml")
 
-        @dp.message(Command("session-current"))
+        @dp.message(Command("session_current"))
         async def cmd_session_current(message: Message) -> None:
             assert message.chat
             chat_id = str(message.chat.id)
@@ -373,7 +373,7 @@ class TelegramChannel(BaseChannel):
                     f"Send a message to create a new session at this workspace."
                 )
 
-        @dp.message(Command("session-close"))
+        @dp.message(Command("session_close"))
         async def cmd_session_close(message: Message) -> None:
             assert message.chat
             chat_id = str(message.chat.id)
@@ -386,7 +386,7 @@ class TelegramChannel(BaseChannel):
             repo = sm.get_telegram_repo(chat_id)
             if not repo:
                 await message.answer(
-                    "No workspace selected. Use /workspace-list, /repo-list, or /session-list to pick a workspace or session."
+                    "No workspace selected. Use /workspace_list, /repo_list, or /session_list to pick a workspace or session."
                 )
                 return
             repo_resolved = str(Path(repo).resolve())
@@ -397,7 +397,7 @@ class TelegramChannel(BaseChannel):
             await sm.close_session(row["id"])
             await message.answer("Session closed (agent process stopped).")
 
-        @dp.message(Command("session-close-all"))
+        @dp.message(Command("session_closeall"))
         async def cmd_session_closeall(message: Message) -> None:
             assert message.chat
             chat_id = str(message.chat.id)
@@ -422,7 +422,7 @@ class TelegramChannel(BaseChannel):
                 return
             lst = self._pending_github_repos.get(chat_id)
             if not lst or not (0 <= idx < len(lst)):
-                await cb.answer("List expired — send /repo-list again.", show_alert=True)
+                await cb.answer("List expired — send /repo_list again.", show_alert=True)
                 return
             nwo = lst[idx]
             await cb.answer("Cloning…")
@@ -450,7 +450,7 @@ class TelegramChannel(BaseChannel):
                 return
             lst = self._pending_workspace_paths.get(chat_id)
             if not lst or not (0 <= idx < len(lst)):
-                await cb.answer("List expired — send /workspace-list again.", show_alert=True)
+                await cb.answer("List expired — send /workspace_list again.", show_alert=True)
                 return
             path = lst[idx]
             await cb.answer("OK")
@@ -479,7 +479,7 @@ class TelegramChannel(BaseChannel):
             await cb.message.answer(
                 f"▶ Connected to session: {title}\n"
                 f"Status: {status} — your messages now go to this session.\n"
-                f"Use /session-close or pick another workspace via /workspace-list / /repo-list."
+                f"Use /session_close or pick another workspace via /workspace_list / /repo_list."
             )
 
         @dp.callback_query(F.data.startswith("q:"))
