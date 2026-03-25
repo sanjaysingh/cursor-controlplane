@@ -147,13 +147,17 @@ Sessions are scoped to your browser via a stable client id stored in `localStora
 
 | Command | Action |
 |---------|--------|
-| `/session_new` | Start a new session at workspace root |
-| `/workspaces` | Browse local folders under workspace root |
-| `/repos` | Browse GitHub repos (requires `gh auth login`) |
-| `/sessions` | List open sessions and switch between them |
-| `/session_close` | Stop the agent for the current session |
+| `/start` | Show help and available commands |
+| `/workspace-list` | Browse local folders under workspace root |
+| `/repo-list` | Browse GitHub repos (requires `gh auth login`) |
+| `/session-list` | List open sessions and switch between them |
+| `/model-list` | List available models and set the default |
+| `/model-default` | Show the current default model |
+| `/session-current` | Show current session details (workspace, model, status) |
+| `/session-close` | Close current session (stop agent) |
+| `/session-close-all` | Close all sessions (stop all agents) |
 
-Plain messages are forwarded to the active session's agent process.
+Plain messages are forwarded to the active session's agent process. If no session exists, a new one is automatically created at the workspace root.
 
 ## How sessions work
 

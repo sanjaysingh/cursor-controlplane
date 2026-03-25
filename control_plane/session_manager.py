@@ -260,7 +260,7 @@ class SessionManager:
                 return r.name
         return Path(path).name
 
-    def _resolve_repo_path(self, msg: IncomingMessage) -> str | None:
+    def _resolve_repo_path(self, msg: IncomingMessage) -> str:
         if msg.repo_path and Path(msg.repo_path).is_dir():
             return str(Path(msg.repo_path).resolve())
         if msg.channel == "telegram":
@@ -271,7 +271,8 @@ class SessionManager:
             first = self.app_config.repos[0]
             if Path(first.path).is_dir():
                 return str(Path(first.path).resolve())
-        return None
+        # Default to workspace root (no repository folder)
+        return str(self.workspace_root_path().resolve())
 
     async def refresh_db_default_model(self) -> None:
         """Load `default_model` from app_settings into ``_db_default_model`` (normalized id or None)."""
@@ -554,14 +555,6 @@ class SessionManager:
                 self.set_telegram_active_session(msg.conversation_id, None)
 
         repo_path = self._resolve_repo_path(msg)
-        if not repo_path:
-            ch = self.registry.get(msg.channel)
-            await ch.send_message(
-                msg.conversation_id,
-                "No valid repo path. Use /session_new, /workspaces, /repos (Telegram) or configure repos in config.yaml.",
-            )
-            return None
-
         lock_key = f"{msg.channel}:{msg.conversation_id}:{repo_path}"
         async with self._session_create_locks[lock_key]:
             row = await self.db.find_open_agent_session(msg.channel, msg.conversation_id, repo_path)
