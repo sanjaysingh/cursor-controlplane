@@ -174,7 +174,6 @@ stop_macos_service() {
   echo "Stopping existing LaunchAgent..." >&2
   launchctl bootout "gui/$(id -u)" "${PLIST}" 2>/dev/null || true
   launchctl bootout "gui/$(id -u)/com.cursor.controlplane" 2>/dev/null || true
-  launchctl unload "${PLIST}" 2>/dev/null || true
   kill_macos_stale_processes
 }
 
@@ -266,12 +265,11 @@ install_macos_service() {
 PLIST
   launchctl bootout "gui/$(id -u)" "${plist}" 2>/dev/null || true
   launchctl bootout "gui/$(id -u)/com.cursor.controlplane" 2>/dev/null || true
-  launchctl unload "${plist}" 2>/dev/null || true
   kill_macos_stale_processes
   if launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null; then
     :
   else
-    launchctl unload "$plist" 2>/dev/null || true
+    launchctl kickstart -k "gui/$(id -u)/com.cursor.controlplane" 2>/dev/null || true
     launchctl load "$plist"
   fi
   if ! wait_for_macos_process_start; then

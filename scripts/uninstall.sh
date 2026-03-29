@@ -116,7 +116,6 @@ fi
 if [[ "$uname_s" == "Darwin" ]]; then
   launchctl bootout "gui/$(id -u)" "${PLIST}" 2>/dev/null || true
   launchctl bootout "gui/$(id -u)/com.cursor.controlplane" 2>/dev/null || true
-  launchctl unload "${PLIST}" 2>/dev/null || true
   kill_macos_stale_processes
   rm -f "${PLIST}"
 fi

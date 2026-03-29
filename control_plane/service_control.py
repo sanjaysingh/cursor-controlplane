@@ -89,6 +89,18 @@ def _kill_macos_stale_processes(bin_path: Path) -> None:
     _wait_for_macos_process_exit(bin_path, timeout_s=5.0)
 
 
+def _launchctl_bootout_expected_miss(args: list[str]) -> None:
+    """bootout returns 3 / 'No such process' when the job is not loaded; that is normal."""
+    r = subprocess.run(args, capture_output=True, text=True, check=False)
+    if r.returncode == 0:
+        return
+    err = (r.stderr or "").strip()
+    if r.returncode == 3 or "No such process" in err:
+        return
+    if err:
+        print(err, file=sys.stderr)
+
+
 def _restart_macos_launchd(label: str) -> int:
     plist = _macos_launchagent_plist()
     bin_path = _macos_binary_path()
@@ -101,15 +113,44 @@ def _restart_macos_launchd(label: str) -> int:
         print("restart: launchd is only supported on macOS.", file=sys.stderr)
         return 1
     domain = f"gui/{uid}"
-    subprocess.run(["launchctl", "bootout", domain, str(plist)], check=False)
-    subprocess.run(["launchctl", "bootout", f"{domain}/{label}"], check=False)
-    subprocess.run(["launchctl", "unload", str(plist)], check=False)
+    service_target = f"{domain}/{label}"
+
+    _launchctl_bootout_expected_miss(["launchctl", "bootout", domain, str(plist)])
+    _launchctl_bootout_expected_miss(["launchctl", "bootout", service_target])
+    # Do not use launchctl unload here: for gui-domain LaunchAgents it often fails with
+    # EIO (5) on modern macOS when mixed with bootstrap/bootout; Apple recommends bootout/bootstrap.
+
     _kill_macos_stale_processes(bin_path)
-    r = subprocess.run(["launchctl", "bootstrap", domain, str(plist)], check=False)
+
+    r = subprocess.run(
+        ["launchctl", "bootstrap", domain, str(plist)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     if r.returncode == 0:
         return 0
-    r = subprocess.run(["launchctl", "load", str(plist)], check=False)
-    return int(r.returncode)
+
+    kick = subprocess.run(
+        ["launchctl", "kickstart", "-k", service_target],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if kick.returncode == 0:
+        return 0
+
+    if (r.stderr or "").strip():
+        print(r.stderr.strip(), file=sys.stderr)
+    if (kick.stderr or "").strip():
+        print(kick.stderr.strip(), file=sys.stderr)
+
+    legacy = subprocess.run(["launchctl", "load", str(plist)], capture_output=True, text=True, check=False)
+    if legacy.returncode == 0:
+        return 0
+    if (legacy.stderr or "").strip():
+        print(legacy.stderr.strip(), file=sys.stderr)
+    return int(legacy.returncode)
 
 
 def restart_service() -> int:

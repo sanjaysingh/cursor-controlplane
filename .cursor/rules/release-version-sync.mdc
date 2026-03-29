@@ -1,0 +1,20 @@
+---
+description: On release, bump version in pyproject.toml and control_plane/__init__.py together
+globs:
+  - pyproject.toml
+  - control_plane/__init__.py
+alwaysApply: true
+---
+
+# Release version — keep two sources aligned
+
+The published package version must match the runtime `__version__` string. They have diverged before (e.g. `__init__.py` updated without `pyproject.toml`).
+
+When changing the release version, **always update both** in the same change:
+
+1. **`pyproject.toml`** — `[project]` → `version = "x.y.z"`
+2. **`control_plane/__init__.py`** — `__version__ = "x.y.z"`
+
+Use the **same** semver string in both places. After editing, grep the repo for the old version to catch stray references if needed.
+
+Optional: MCP `clientInfo.version` in `control_plane/acp_client.py` is separate; bump it only when you intend to change the ACP client identity string.
