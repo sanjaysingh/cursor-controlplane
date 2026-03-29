@@ -228,28 +228,16 @@ class SessionManager:
 
     async def telegram_prepare_workspace(self, chat_id: str, repo_path: str) -> None:
         """
-        After selecting a workspace/repo on Telegram: close pinned and open sessions,
-        then set the chat's workspace path so the next message starts a new session.
+        After selecting a workspace/repo on Telegram: clear the active session pin
+        and set the chat's workspace path. Existing sessions are kept open so
+        multi-project workflows don't lose agent context.
         """
         cid = str(chat_id)
         new_resolved = str(Path(repo_path).resolve())
-        active = self.get_telegram_active_session(cid)
-        if active:
-            await self.close_session(active)
-            self.set_telegram_active_session(cid, None)
-        old = self.get_telegram_repo(cid)
-        if old:
-            try:
-                old_resolved = str(Path(old).resolve())
-            except OSError:
-                old_resolved = old
-            if old_resolved != new_resolved:
-                row = await self.db.find_open_agent_session("telegram", cid, old_resolved)
-                if row:
-                    await self.close_session(row["id"])
-        row = await self.db.find_open_agent_session("telegram", cid, new_resolved)
-        if row:
-            await self.close_session(row["id"])
+
+        # Clear the active session pin so messages route to the new workspace
+        self.set_telegram_active_session(cid, None)
+
         self.set_telegram_repo(cid, new_resolved)
 
     def _repo_name_for_path(self, path: str) -> str:
